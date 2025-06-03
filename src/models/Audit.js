@@ -13,21 +13,12 @@ class Audit {
    */
   constructor(app) {
     this.app = app;
-
-    // Counters
     this.goPlusCalls = 0;
-    this.mythrilInstances = 0;
-
-    // Queues
     this.goPlusQueue = [];
-    this.mythrilQueue = [];
-
-    // Timers / Intervals
     this.goPlusInterval = null;
-    this.mythrilInterval = null;
 
     // Keeps track of the running audits
-    this.goPlusRunning = new Set();
+    this.goPlusRunning = new Map();
   }
 
   /**
@@ -47,22 +38,6 @@ class Audit {
   }
 
   /**
-   * Starts the Mythril audit
-   * @param {string} chainId
-   * @param {string} newTokenAddress
-   * @returns
-   */
-  async mythrilAudit(chainId, newTokenAddress) {
-    // Run the Mythril audit
-    const mythrilResults = await MythrilAudit(this, chainId, newTokenAddress);
-
-    return {
-      success: mythrilResults.success,
-      data: { ...mythrilResults },
-    };
-  }
-
-  /**
    * Adds a new token to the audit queue
    * @param {DodoEgg} dodoEgg
    */
@@ -73,7 +48,6 @@ class Audit {
       chainId: data.chainId,
       newTokenAddress: data.newTokenAddress,
       goPlusResults: null,
-      mythrilResults: null,
       running: false,
     };
 
@@ -129,34 +103,6 @@ class Audit {
       // Process the audit asynchronously
       this.processGoPlusAudit(dodo).catch(console.error);
     }, 1000); // 1 second
-
-    /**
-     * Begins the Mythril Audit Interval which runs a check every second to see
-     * if we can run a mythril audit. If the audit comes back with a success,
-     * it will be added to the Mythril Audit Queue. If not it will return to the app
-     */
-    this.mythrilInterval = setInterval(async () => {
-      // Check if the queue is empty
-      if (this.mythrilQueue.length === 0) {
-        return;
-      }
-
-      // Wait if we've hit the instance limit
-      while (this.mythrilInstances >= 4) {
-        await new Promise((resolve) => setTimeout(resolve, 5000)); // 5 second wait
-      }
-
-      // Look for the first non-running item
-      const index = this.mythrilQueue.findIndex((dodo) => !dodo.running);
-      if (index === -1) return; // All items are running
-
-      const dodo = this.mythrilQueue[index];
-      dodo.running = true;
-      this.mythrilInstances++;
-
-      // Process the audit asynchronously
-      this.processMythrilAudit(dodo).catch(console.error);
-    }, 1100);
   }
 
   /**
@@ -193,40 +139,6 @@ class Audit {
     } finally {
       // Remove the dodo from the running audits
       this.goPlusRunning.delete(dodo.id);
-    }
-  }
-
-  /**
-   * Processes the Mythril audit
-   * @param {DodoEgg} dodo
-   */
-  async processMythrilAudit(dodo) {
-    try {
-      // Run the audit
-      const auditResults = await this.mythrilAudit(
-        dodo.chainId,
-        dodo.newTokenAddress
-      );
-
-      // Format the results
-      const results = {
-        success: dodo.goPlusResults.success && auditResults.success,
-        goPlusAudit: { ...dodo.goPlusResults },
-        mythrilAudit: { ...auditResults },
-        timestamp: new Date().toISOString(),
-      };
-
-      // Send the results to the app
-      this.app.processAudit(dodo.id, results);
-
-      // Remove the dodo from the Mythril Queue
-      this.mythrilQueue = this.mythrilQueue.filter(
-        (item) => item.id !== dodo.id
-      );
-    } finally {
-      // Remove the dodo from the running audits
-      this.mythrilInstances--;
-      dodo.running = false;
     }
   }
 }

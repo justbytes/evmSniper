@@ -1,67 +1,18 @@
 [
-  {
-    "id": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-    "name": "Wrapped Ether",
-    "chainId": 1
-  },
-  {
-    "id": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-    "name": "USD Coin",
-    "chainId": 1
-  },
-  {
-    "id": "0xdac17f958d2ee523a2206206994597c13d831ec7",
-    "name": "Tether USD",
-    "chainId": 1
-  },
-  {
-    "id": "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
-    "name": "Wrapped BTC",
-    "chainId": 1
-  },
-  {
-    "id": "0x6b175474e89094c44da98b954eedeac495271d0f",
-    "name": "Dai Stablecoin",
-    "chainId": 1
-  },
-  {
-    "id": "0x4c9edd5852cd905f086c759e8383e09bff1e68b3",
-    "name": "USDe",
-    "chainId": 1
-  },
-  {
-    "id": "0x514910771af9ca656af840dff83e8264ecf986ca",
-    "name": "ChainLink Token",
-    "chainId": 1
-  },
-  {
-    "id": "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0",
-    "name": "Matic Token",
-    "chainId": 1
-  },
-  {
-    "id": "0x4200000000000000000000000000000000000006",
-    "name": "Wrapped Ether",
-    "chainId": 8453
-  },
-  {
-    "id": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "name": "USD Coin",
-    "chainId": 8453
-  },
-  {
-    "id": "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",
-    "name": "Wrapped BTC",
-    "chainId": 8453
-  },
-  {
-    "id": "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
-    "name": "Dai Stablecoin",
-    "chainId": 8453
-  },
-  {
-    "id": "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",
-    "name": "USDe",
-    "chainId": 8453
-  }
+  "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "0x4200000000000000000000000000000000000006",
+  "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+  "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",
+  "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34",
+  "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+  "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+  "0xB8c77482e45F1F44dE1745F52C74426C631bDD52",
+  "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
+  "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+  "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0",
+  "0x514910771AF9Ca656af840dff83E8264EcF986CA",
+  "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3",
+  "0x6B175474E89094C44Da98b954EedeAC495271d0F"
 ]

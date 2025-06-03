@@ -1,16 +1,18 @@
 const fs = require("fs");
 const path = require("path");
 
-const KNOWN_TOKENS_JSON = path.join(
-  __dirname,
-  "../../../data/known_tokens.json"
-);
+const KNOWN_TOKENS_JSON = path.join(__dirname, "../../data/known_tokens.json");
 const KNOWN_TOKEN_DATA = fs.readFileSync(KNOWN_TOKENS_JSON);
 const KNOWN_TOKENS = JSON.parse(KNOWN_TOKEN_DATA);
 
+/**
+ * Checks if the token is in the list of known tokens
+ * @param {string} targetAddress
+ * @returns
+ */
 const checkList = (targetAddress) => {
   for (let i = 0; i < KNOWN_TOKENS.length; i++) {
-    let knownAddress = KNOWN_TOKENS[i].id;
+    let knownAddress = KNOWN_TOKENS[i];
     if (targetAddress.toLowerCase() === knownAddress.toLowerCase()) {
       return true;
     }
@@ -18,6 +20,12 @@ const checkList = (targetAddress) => {
   return false;
 };
 
+/**
+ * Check two tokens to find out which one is the new one
+ * @param {string} token0
+ * @param {string} token1
+ * @returns
+ */
 const checkIfTokenIsNew = (token0, token1) => {
   let count = 0;
   let baseToken;
@@ -37,8 +45,10 @@ const checkIfTokenIsNew = (token0, token1) => {
     newToken = token0;
   }
 
-  // If both tokens are known, return false
-  if (count === 2) {
+  // If both tokens are known or if neither token is known return false
+  if (count == 0) {
+    return { newToken: false, baseToken: false };
+  } else if (count === 2) {
     return { newToken: false, baseToken: false };
   }
 

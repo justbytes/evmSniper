@@ -1,7 +1,7 @@
 const { Alchemy } = require("alchemy-sdk");
-const getAlchemySettings = require("./utils/getAlchemySettings");
+const getAlchemySettings = require("../utils/getAlchemySettings");
 
-class DodoEgg {
+class TokenData {
   /**
    * Constructor for a DodoEgg
    * @param {uuid} id
@@ -61,7 +61,7 @@ class DodoEgg {
   /**
    * @returns current dodo egg info
    */
-  getDodoEgg() {
+  getTokenData() {
     return {
       id: this.id,
       chainId: this.chainId,
@@ -83,4 +83,4 @@ class DodoEgg {
   }
 }
 
-module.exports = DodoEgg;
+module.exports = TokenData;

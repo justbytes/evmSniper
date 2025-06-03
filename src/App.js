@@ -1,7 +1,7 @@
 const WebSocket = require("ws");
 const { deserializeDodo } = require("./utils/dodoCoder");
 const Audit = require("./controller/audit/Audit");
-const Trader = require("./controller/trader/Trader");
+const Trader = require("./controller/blockchain/Trader");
 const { saveAuditedDodoEgg } = require("./utils/archive");
 
 class App {

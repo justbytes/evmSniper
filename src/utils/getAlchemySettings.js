@@ -1,4 +1,4 @@
-require("dotenv").config({ path: "../../.env" });
+require("dotenv").config({ path: "../.env" });
 const { Network } = require("alchemy-sdk");
 
 /**
@@ -10,12 +10,12 @@ const getAlchemySettings = (chainId) => {
   switch (chainId) {
     case "1":
       return {
-        apiKey: process.env.ALCHEMY_PROVIDER,
+        apiKey: process.env.ALCHEMY_KEY,
         network: Network.ETH_MAINNET,
       };
     case "8453":
       return {
-        apiKey: process.env.ALCHEMY_PROVIDER,
+        apiKey: process.env.ALCHEMY_KEY,
         network: Network.BASE_MAINNET,
       };
 

@@ -1,28 +1,35 @@
 const { ethers } = require("ethers");
 const { Alchemy, Interface } = require("alchemy-sdk");
-const getAlchemySettings = require("./utils/getAlchemySettings");
-const checkIfTokenIsNew = require("./utils/newTokenChecker");
-const WebSocket = require("ws");
+const getAlchemySettings = require("../utils/getAlchemySettings");
+const checkIfTokenIsNew = require("../utils/newTokenChecker");
 
 const {
   abi: UniswapV3FactoryABI,
 } = require("@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json");
 
-// Interface objects so the contract abis can be parsed
+// Get the interface of the ABI
 const FACTORY_V3_INTERFACE = new ethers.Interface(UniswapV3FactoryABI);
 
+/**
+ * This class is used to create event listeners for any Uniswap v3 fork.
+ */
 class V3TokenPairListener {
   /**
-   *
-   * @param {string} factoryAddress
-   * @param {number} chainId
+   * Constructor creates the Alchemy provider based on the given chainId
+   * @param {string} factoryAddress - target factory address
+   * @param {string} chainId - target blockchain id
+   * @param {WebSocket} server - the websocket server that takes the newly created tokens and processes them
    */
-  constructor(factoryAddress, chainId) {
+  constructor(factoryAddress, chainId, server) {
     this.totalSent = 0;
-    this.server = new WebSocket("ws://localhost:8069");
-    this.factoryAddress = factoryAddress;
     this.chainId = chainId;
-    this.provider = new Alchemy(getAlchemySettings(chainId));
+    this.factoryAddress = factoryAddress;
+    this.server = server;
+
+    // Create a provider for the targeted blockchain
+    this.provider = new Alchemy(getAlchemySettings(String(chainId)));
+
+    // Start the PairCreated event listener
     this.activateListener();
   }
 
@@ -38,8 +45,9 @@ class V3TokenPairListener {
         topics: [FACTORY_V3_INTERFACE.getEvent("PoolCreated").topicHash],
       };
 
-      // Activate the listener
+      // Start the listener
       this.provider.ws.on(filter, (log) => {
+        // When triggered send the log for processing
         this.processEventLog(log);
       });
     } catch (error) {
@@ -53,7 +61,6 @@ class V3TokenPairListener {
   /**
    * Decoded v3 log data
    * @param {*} log encoded event data
-   * @param {*} chainId pass the chain id of the blockchain
    */
   async processEventLog(log) {
     const decodedLog = FACTORY_V3_INTERFACE.parseLog(log);
@@ -69,8 +76,10 @@ class V3TokenPairListener {
     const { newToken, baseToken } = checkIfTokenIsNew(token0, token1);
 
     // If both tokens are known, return
-    if (!newToken) {
-      console.log("************* | Both tokens are known | *************");
+    if (!newToken && !baseToken) {
+      console.log(
+        "************* | Unable to identify which token is new! | *************"
+      );
       return;
     }
 
@@ -85,17 +94,10 @@ class V3TokenPairListener {
     };
 
     // Send it to the server
-    this.server.send(this.bigIntSafeSerialize(data));
+    this.server.send(data);
 
     // Increment the total sent
     this.totalSent++;
-  }
-
-  // Utility function for BigInt-safe serialization
-  bigIntSafeSerialize(obj) {
-    return JSON.stringify(obj, (key, value) =>
-      typeof value === "bigint" ? value.toString() : value
-    );
   }
 }
 
