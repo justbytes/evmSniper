@@ -96,7 +96,7 @@ export class V3TokenPairListener {
     };
 
     // Send it to the server
-    this.server.send(JSON.stringify({ action: 'audit', data: data }));
+    this.server.send(JSON.stringify(data));
 
     // Increment the total sent
     this.totalSent++;

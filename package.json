@@ -9,16 +9,16 @@
   },
   "dependencies": {
     "@goplus/sdk-node": "^1.0.12",
-    "@uniswap/sdk-core": "^5.3.1",
+    "@uniswap/sdk-core": "^7.7.2",
     "@uniswap/v2-periphery": "^1.1.0-beta.0",
-    "@uniswap/v2-sdk": "^4.4.0",
+    "@uniswap/v2-sdk": "^4.15.2",
     "@uniswap/v3-sdk": "^3.8.3",
-    "alchemy-sdk": "^3.4.1",
+    "alchemy-sdk": "^3.6.0",
     "bignumber": "^1.1.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.5.0",
     "esbuild": "^0.25.5",
     "esrun": "^0.0.1",
-    "ethers": "^6.12.1",
-    "ws": "^8.18.0"
+    "ethers": "^6.14.3",
+    "ws": "^8.18.2"
   }
 }

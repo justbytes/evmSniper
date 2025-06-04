@@ -99,7 +99,7 @@ export class V2TokenPairListener {
     };
 
     // Send it to the websocket server
-    this.server.send(JSON.stringify({ action: 'audit', data: data }));
+    this.server.send(JSON.stringify(data));
 
     // Increment the total sent
     this.totalSent++;
