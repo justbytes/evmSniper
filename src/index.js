@@ -1,5 +1,4 @@
 import fs from 'fs';
-import path from 'path';
 import dotenv from 'dotenv';
 import WebSocket from 'ws';
 import { V2TokenPairListener } from './listeners/V2TokenPairListener.js';

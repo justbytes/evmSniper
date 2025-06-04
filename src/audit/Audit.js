@@ -1,4 +1,4 @@
-import GoPlusAudit from './GoPlusAudit.js';
+import { GoPlusAudit } from './GoPlusAudit.js';
 
 /**
  * Runs the GoPlus and Mythril audits and returns the results
@@ -8,13 +8,20 @@ import GoPlusAudit from './GoPlusAudit.js';
 export class Audit {
   /**
    * Constructor for the Audit class
-   * @param {App} app - The main app instance
+   * @param {WebsocketServer} server - The main app instance
    */
   constructor(server) {
     this.server = server;
     this.goPlusCalls = 0;
-    this.goPlusQueue = [];
+    this.auditQueue = [];
     this.goPlusInterval = null;
+  }
+
+  /**
+   * Get the current queue size
+   */
+  get size() {
+    return this.auditQueue.length;
   }
 
   /**
@@ -23,39 +30,31 @@ export class Audit {
   start() {
     console.log('************* |   Starting Audit Queue    | *************');
 
-    /**
-     * Begins the GoPlus Audit Interval which runs a check every second to see
-     * if we can run a go plus audit. If the audit comes back with a success,
-     * it will be added to the Mythril Audit Queue. If not it will return to the app
-     */
     this.goPlusInterval = setInterval(async () => {
       // Check if the queue is empty
-      if (this.goPlusQueue.length === 0) {
+      if (this.auditQueue.length === 0) {
         return;
       }
 
       // If the number of audits is greater than 30, wait for 1 minute and reset the counter
-      while (this.goPlusCalls >= 30) {
+      if (this.goPlusCalls >= 30) {
+        console.log('Rate limit reached, waiting 1 minute...');
         await new Promise(resolve => setTimeout(resolve, 60000)); // 1 minute
         this.goPlusCalls = 0;
       }
 
-      // Look for the first non-running item in the queue
-      const index = this.goPlusQueue.findIndex(
-        newToken => !this.goPlusRunning.has(newToken.newTokenAddress)
-      );
-      if (index === -1) return; // All items are running
-
-      // Get the newToken from the queue
-      const newToken = this.goPlusQueue[index];
+      // Get the first token from the queue
+      const newToken = this.auditQueue.shift();
 
       // Process the audit asynchronously
-      this.runGoPlusAudit(newToken).catch(console.error);
+      this.runGoPlusAudit(newToken);
     }, 1000); // 1 second
+
+    return this;
   }
 
   /**
-   * Stops the Mythril audit queue
+   * Stops audit queue
    */
   stop() {
     clearInterval(this.goPlusInterval);
@@ -67,7 +66,10 @@ export class Audit {
    * @param {*} data of a new token
    */
   addToQueue(data) {
-    this.goPlusQueue.push(data);
+    console.log('Data to queue: ', data);
+
+    this.auditQueue.push(data);
+    console.log('Queue size is now:', this.auditQueue.length);
   }
 
   /**
@@ -75,33 +77,43 @@ export class Audit {
    * @param {*} newToken data
    */
   async runGoPlusAudit(newToken) {
+    console.log('*** Starting GoPlus audit for:', newToken.newTokenAddress);
+
     try {
+      // Increment the call counter
+      this.goPlusCalls++;
+
       // Run the audit
-      const results = await new GoPlusAudit(this, chainId, newTokenAddress).main();
+      const results = await new GoPlusAudit(
+        this,
+        newToken.chainId,
+        newToken.newTokenAddress
+      ).main();
+
+      console.log('GoPlus audit completed. Success:', results.success);
 
       // If the audit was unsuccessful return
       if (!results.success) {
-        // Remove the newToken from the GoPlus Queue
-        this.goPlusQueue = this.goPlusQueue.filter(
-          item => item.newTokenAddress !== newToken.newTokenAddress
-        );
+        console.log('Audit failed for token:', newToken.newTokenAddress);
         return;
       }
 
       console.log('');
       console.log('************* |   AUDIT SUCCESS   | *************');
+      console.log('Token:', newToken.newTokenAddress);
       console.log('');
 
       // Add the audit results to the newToken object
       newToken.auditResults = results.data;
+
+      // Send to server using broadcast instead of send
       this.server.send(JSON.stringify({ action: 'trade', data: newToken }));
-      JSON.stringify({ action: 'audit', data: data });
-      // Remove the newToken from the GoPlus Queue
-      this.goPlusQueue = this.goPlusQueue.filter(
-        item => item.newTokenAddress !== newToken.newTokenAddress
+    } catch (error) {
+      console.error(
+        'There was an error running go plus audit on: ',
+        newToken.newTokenAddress,
+        error
       );
-    } catch {
-      console.error('There was an error running go plus audit on: ', newToken.newTokenAddress);
     }
   }
 }

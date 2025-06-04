@@ -63,25 +63,25 @@ export class V3TokenPairListener {
 
     const { token0, token1, fee, tickSpacing, pool } = decodedLog.args;
 
-    console.log("DECODED LOG: ", this.chainId, token0, token1, pool, fee);
+    // console.log("DECODED LOG: ", this.chainId, token0, token1, pool, fee);
 
 
-    console.log('************* | V3 pair detected | *************');
-    console.log('');
+    // console.log('************* | V3 pair detected | *************');
+    // console.log('');
 
     let data;
 
     // Find out which token is new
     const { newToken, baseToken } = findNewToken(token0, token1);
 
-    console.log("NewToken ", newToken);
-    console.log("BaseToken ", baseToken);
+    // console.log("NewToken ", newToken);
+    // console.log("BaseToken ", baseToken);
 
 
 
     // If both tokens are known, return
     if (!newToken && !baseToken) {
-      console.log('************* | Unable to identify which token is new! | *************');
+      // console.log('************* | Unable to identify which token is new! | *************');
       return;
     }
 

@@ -22,14 +22,20 @@ export class GoPlusAudit {
    * @returns {object} malicious results
    */
   async maliciousCheck() {
+    console.log('RUNNING MALICIOUS CHECK');
+
     // Wait for 1 second if counter is greater than 30
     while (this.app.goPlusCalls >= 30) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
+    console.log('THIS IS AFTER THE MALICIOUS WHILE LOOP');
+
     try {
       // Get the address security data
       const response = await GoPlus.addressSecurity(this.chainId, this.newTokenAddress);
+
+      console.log('MALISOUS RESULTS', response);
 
       // Increment the number of audits calls
       this.app.goPlusCalls++;
@@ -51,6 +57,8 @@ export class GoPlusAudit {
    * @returns {object} security data
    */
   async fetchSecurityData() {
+    console.log('FETCHING SECURITY DATA');
+
     const MAX_RETRIES = 12;
     const RETRY_DELAY = 10000; // 10 seconds
     const TIMEOUT = 45;
@@ -117,6 +125,7 @@ export class GoPlusAudit {
 
     // Get the security data
     const response = await fetchData();
+    console.log('RESPONES FROM FETCH SECURITY DATA:', response);
 
     // If the response is false, return the failure
     if (!response) {
@@ -132,26 +141,36 @@ export class GoPlusAudit {
    * @param {string} targetAddress
    * @returns {object} security data
    */
-  async securityCheck(chainId, targetAddress) {
+  async securityCheck() {
+    console.log('RUNNING SECURITY CHECK');
+
+    // Remove unused parameters
     // Trading Security Checks
     const tradingSecurityChecks = ['cannot_buy', 'cannot_sell_all'];
 
+    console.log('Fetching security data for:', this.newTokenAddress);
+
     // Get the security data
-    const data = await this.fetchSecurityData(chainId, targetAddress);
+    const data = await this.fetchSecurityData(); // Remove parameters
 
     if (!data) {
+      console.log('Failed to fetch security data');
       return {
         success: false,
         data: null,
         reason: 'GoPlus API call failed',
       };
     }
+
+    console.log('Security data received, checking conditions...');
+
     // Check if contract is open source first
     if (data.is_open_source !== '1') {
-      // If the contract is not open source, return the data and reason for failure
+      console.log('Contract is not open source');
       return {
         success: false,
         data: data,
+        reason: 'Contract not open source',
       };
     }
 
@@ -159,17 +178,17 @@ export class GoPlusAudit {
     const isTradingSecure = tradingSecurityChecks.every(check => data[check] === '0');
 
     if (!isTradingSecure) {
-      // If the trading is not secure, return the data and reason for failure
+      console.log('Trading is not secure');
       return {
         success: false,
         data: data,
-        reason: 'Unknown buy/sell tax',
+        reason: 'Trading not secure',
       };
     }
 
     // Check if the buy/sell tax is unknown
     if (data.buy_tax === '' || data.sell_tax === '') {
-      // If the buy/sell tax is unknown, return the data and reason for failure
+      console.log('Buy/sell tax is unknown');
       return {
         success: false,
         data: data,
@@ -181,11 +200,13 @@ export class GoPlusAudit {
     const sellTax = parseFloat(data.sell_tax);
     const MAX_TAX = 0.2;
 
+    console.log(`Buy tax: ${buyTax}, Sell tax: ${sellTax}`);
+
     if (buyTax <= MAX_TAX && sellTax <= MAX_TAX) {
-      // If the buy/sell tax is less than the max tax, return the data and success
+      console.log('Tax levels acceptable');
       return { success: true, data: { ...data } };
     } else {
-      // If the buy/sell tax is greater than the max tax, return the data and reason for failure
+      console.log('Tax levels too high');
       return {
         success: false,
         data: { ...data },
@@ -201,11 +222,16 @@ export class GoPlusAudit {
    * @returns {object} audit results
    */
   async main() {
+    console.log('RUNNING SECURITY ANALYSIS');
+
     // Get the security results
-    const securityResults = await this.securityCheck(this.chainId, this.newTokenAddress);
+    const securityResults = await this.securityCheck();
+    console.log(securityResults);
 
     // If it fails the security check return
     if (!securityResults.success) {
+      console.log('AUDIT UNSUCESSFUL');
+
       return {
         success: false,
         data: { ...securityResults.data },
@@ -215,8 +241,10 @@ export class GoPlusAudit {
     // Get the malicious results
     const maliciousResults = await this.maliciousCheck(this.chainId, this.newTokenAddress);
 
+    console.log('AUDIT SUCCESFUL');
+
     return {
-      success: true,
+      success: maliciousResults.success,
       data: { ...securityResults.data, ...maliciousResults },
     };
   }

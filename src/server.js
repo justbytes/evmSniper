@@ -1,5 +1,6 @@
 import { WebSocketServer } from 'ws';
 import { EventEmitter } from 'events';
+import { Audit } from './audit/Audit.js';
 
 export class WebSocketController extends EventEmitter {
   constructor(port = 8069) {
@@ -7,6 +8,7 @@ export class WebSocketController extends EventEmitter {
     this.port = port;
     this.wss = null;
     this.isRunning = false;
+    this.audit = new Audit(this).start();
   }
 
   async startServer() {
@@ -64,25 +66,19 @@ export class WebSocketController extends EventEmitter {
         console.log('');
 
         if (!data) {
-          console.log('Invalid data format');
-          ws.send(JSON.stringify({ error: 'Invalid data format' }));
+          console.log('*******   ERROR: Invalid data format   ******');
+          // ws.send(JSON.stringify({ error: 'Invalid data format' }));
           return;
         }
 
         if (data.action == 'audit') {
-          console.log('going to run an audit');
+          // Add to audit queue
+          this.audit.addToQueue(data.data);
+          this.emit('NewTokenFound', data);
         } else if (data.action == 'trade') {
           console.log('going to run a trade');
+          this.emit('TradeFound', data);
         }
-
-        // Store the newToken
-        this.newTokens.set(newToken.newTokenAddress, {
-          ...newToken,
-          createdAt: new Date(),
-        });
-
-        // Add to audit queue
-        this.audit.addToQueue(newToken);
 
         // Acknowledge receipt
         ws.send(
@@ -91,9 +87,6 @@ export class WebSocketController extends EventEmitter {
             status: 'received',
           })
         );
-
-        console.log(`Processed newtoken egg: ${newToken.id}`);
-        this.emit('NewToken', newToken);
       } catch (error) {
         console.error('Error processing message:', error);
         ws.send(
@@ -187,9 +180,7 @@ export class WebSocketController extends EventEmitter {
 
   saveDataToFile() {
     // Implement your save logic here
-    console.log(
-      `SETUP STILL Saving ${this.newtokens.size} newtokens and ${this.audit.size} audit entries`
-    );
+    console.log(`This should save a token to file`);
     // Example: fs.writeFileSync('data.json', JSON.stringify([...this.newtokens]));
   }
 
@@ -202,7 +193,6 @@ export class WebSocketController extends EventEmitter {
     return {
       isRunning: this.isRunning,
       connectedClients: this.wss ? this.wss.clients.size : 0,
-      totalnewtokens: this.newtokens.size,
       auditQueueSize: this.audit.size,
     };
   }
