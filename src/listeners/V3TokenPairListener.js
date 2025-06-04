@@ -1,11 +1,10 @@
-const { ethers } = require("ethers");
-const { Alchemy, Interface } = require("alchemy-sdk");
-const getAlchemySettings = require("../utils/getAlchemySettings");
-const checkIfTokenIsNew = require("../utils/newTokenChecker");
+import { ethers } from 'ethers';
+import { Alchemy } from 'alchemy-sdk';
+import { getAlchemySettings } from '../utils/getAlchemySettings.js';
+import { findNewToken } from '../utils/newTokenChecker.js';
 
-const {
-  abi: UniswapV3FactoryABI,
-} = require("@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json");
+import  UniswapV3Factory from '@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json'  with { type: 'json' };
+const {abi: UniswapV3FactoryABI} = UniswapV3Factory
 
 // Get the interface of the ABI
 const FACTORY_V3_INTERFACE = new ethers.Interface(UniswapV3FactoryABI);
@@ -13,7 +12,7 @@ const FACTORY_V3_INTERFACE = new ethers.Interface(UniswapV3FactoryABI);
 /**
  * This class is used to create event listeners for any Uniswap v3 fork.
  */
-class V3TokenPairListener {
+export class V3TokenPairListener {
   /**
    * Constructor creates the Alchemy provider based on the given chainId
    * @param {string} factoryAddress - target factory address
@@ -37,24 +36,21 @@ class V3TokenPairListener {
    * Activates a listener for a pair that is created on the Uniswap v3 protocol
    */
   activateListener() {
-    console.log("************* | Activating V3 listener | *************");
+    console.log('************* | Activating V3 listener | *************');
     try {
       // Filter for PoolCreated events indicating a new pool
       const filter = {
         address: this.factoryAddress,
-        topics: [FACTORY_V3_INTERFACE.getEvent("PoolCreated").topicHash],
+        topics: [FACTORY_V3_INTERFACE.getEvent('PoolCreated').topicHash],
       };
 
       // Start the listener
-      this.provider.ws.on(filter, (log) => {
+      this.provider.ws.on(filter, log => {
         // When triggered send the log for processing
         this.processEventLog(log);
       });
     } catch (error) {
-      console.error(
-        `There was an error activating the ${this.chainId} V3 listener.\n` +
-          error
-      );
+      console.error(`There was an error activating the ${this.chainId} V3 listener.\n` + error);
     }
   }
 
@@ -67,19 +63,25 @@ class V3TokenPairListener {
 
     const { token0, token1, fee, tickSpacing, pool } = decodedLog.args;
 
-    console.log("************* | V3 pair detected | *************");
-    console.log("");
+    console.log("DECODED LOG: ", this.chainId, token0, token1, pool, fee);
+
+
+    console.log('************* | V3 pair detected | *************');
+    console.log('');
 
     let data;
 
     // Find out which token is new
-    const { newToken, baseToken } = checkIfTokenIsNew(token0, token1);
+    const { newToken, baseToken } = findNewToken(token0, token1);
+
+    console.log("NewToken ", newToken);
+    console.log("BaseToken ", baseToken);
+
+
 
     // If both tokens are known, return
     if (!newToken && !baseToken) {
-      console.log(
-        "************* | Unable to identify which token is new! | *************"
-      );
+      console.log('************* | Unable to identify which token is new! | *************');
       return;
     }
 
@@ -90,15 +92,13 @@ class V3TokenPairListener {
       baseTokenAddress: baseToken,
       pairAddress: pool,
       v3: true,
-      fee: fee,
+      fee: fee.toString(),
     };
 
     // Send it to the server
-    this.server.send(data);
+    this.server.send(JSON.stringify({ action: 'audit', data: data }));
 
     // Increment the total sent
     this.totalSent++;
   }
 }
-
-module.exports = V3TokenPairListener;

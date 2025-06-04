@@ -1,5 +1,5 @@
-const { Alchemy } = require("alchemy-sdk");
-const getAlchemySettings = require("./utils/getAlchemySettings");
+import { Alchemy } from 'alchemy-sdk';
+import { getAlchemySettings } from './utils/getAlchemySettings.js';
 
 class TokenData {
   /**
@@ -71,8 +71,8 @@ class TokenData {
       v3: this.v3,
       fee: this.fee,
       auditResults: this.auditResults,
-      intialPrice: this.intialPrice == null ? "0" : this.intialPrice.toString(),
-      targetPrice: this.targetPrice == null ? "0" : this.targetPrice.toString(),
+      intialPrice: this.intialPrice == null ? '0' : this.intialPrice.toString(),
+      targetPrice: this.targetPrice == null ? '0' : this.targetPrice.toString(),
       tradeInProgress: this.tradeInProgress,
       baseTokenDecimal: this.baseTokenDecimal,
       newTokenDecimal: this.newTokenDecimal,
@@ -82,5 +82,3 @@ class TokenData {
     };
   }
 }
-
-module.exports = TokenData;

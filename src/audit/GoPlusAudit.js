@@ -1,18 +1,18 @@
-import GoPlus from "@goplus/sdk-node";
+import GoPlus from '@goplus/sdk-node';
 
 /**
  * @class GoPlusAudit
  * @description This class is used to run the GoPlus audit on the new token
  */
-class GoPlusAudit {
+export class GoPlusAudit {
   /**
    * @constructor
    * @description This constructor is used to initialize the GoPlusAudit class
    */
-  constructor(chainId, newTokenAddress) {
+  constructor(app, chainId, newTokenAddress) {
+    this.app = app;
     this.chainId = chainId;
     this.newTokenAddress = newTokenAddress;
-    this.count = 0;
   }
 
   /**
@@ -23,23 +23,20 @@ class GoPlusAudit {
    */
   async maliciousCheck() {
     // Wait for 1 second if counter is greater than 30
-    while (this.count >= 30) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    while (this.app.goPlusCalls >= 30) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     try {
       // Get the address security data
-      const response = await GoPlus.addressSecurity(
-        this.chainId,
-        this.newTokenAddress
-      );
+      const response = await GoPlus.addressSecurity(this.chainId, this.newTokenAddress);
 
       // Increment the number of audits calls
-      this.count++;
+      this.app.goPlusCalls++;
       return response.result;
     } catch (error) {
       console.log(
-        "There was a problem retrieving data from GoPlus address security api call.\n",
+        'There was a problem retrieving data from GoPlus address security api call.\n',
         error
       );
 
@@ -63,47 +60,40 @@ class GoPlusAudit {
     const fetchData = async () => {
       let response;
       // Wait for the counter to be less than 30
-      while (this.count >= 30) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      while (this.app.goPlusCalls >= 30) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
       // Make the GoPlus Data
       try {
         // Make the GoPlus API call
-        response = await GoPlus.tokenSecurity(
-          this.chainId,
-          this.newTokenAddress,
-          TIMEOUT
-        );
+        response = await GoPlus.tokenSecurity(this.chainId, this.newTokenAddress, TIMEOUT);
 
         // Increment the number of audits calls
-        this.count++;
+        this.app.goPlusCalls++;
       } catch (error) {
         // Retry if it fails 12 times
         if (retryCount < MAX_RETRIES) {
-          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
           retryCount++;
           return fetchData();
         }
-        console.error("GoPlus token security API call failed:", error);
+        console.error('GoPlus token security API call failed:', error);
         return false;
       }
 
       // Check max retries
       if (retryCount >= MAX_RETRIES) {
-        console.log("Max retries reached, unable to fetch data from GoPlus");
-        console.log("");
+        console.log('Max retries reached, unable to fetch data from GoPlus');
+        console.log('');
         return false;
       }
 
       // Handle rate limit error
       if (response.code === 4029) {
-        console.log(
-          "GoPlus Rate Limit Reached. Retries left: ",
-          MAX_RETRIES - retryCount
-        );
-        console.log("");
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
+        console.log('GoPlus Rate Limit Reached. Retries left: ', MAX_RETRIES - retryCount);
+        console.log('');
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
         retryCount++;
         return fetchData();
       }
@@ -114,12 +104,9 @@ class GoPlusAudit {
         Object.keys(response).length === 0 ||
         Object.keys(response.result).length === 0
       ) {
-        console.log(
-          "GoPlus data is invalid or empty. Retries left: ",
-          MAX_RETRIES - retryCount
-        );
-        console.log("");
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
+        console.log('GoPlus data is invalid or empty. Retries left: ', MAX_RETRIES - retryCount);
+        console.log('');
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
         retryCount++;
         return fetchData();
       }
@@ -147,7 +134,7 @@ class GoPlusAudit {
    */
   async securityCheck(chainId, targetAddress) {
     // Trading Security Checks
-    const tradingSecurityChecks = ["cannot_buy", "cannot_sell_all"];
+    const tradingSecurityChecks = ['cannot_buy', 'cannot_sell_all'];
 
     // Get the security data
     const data = await this.fetchSecurityData(chainId, targetAddress);
@@ -156,11 +143,11 @@ class GoPlusAudit {
       return {
         success: false,
         data: null,
-        reason: "GoPlus API call failed",
+        reason: 'GoPlus API call failed',
       };
     }
     // Check if contract is open source first
-    if (data.is_open_source !== "1") {
+    if (data.is_open_source !== '1') {
       // If the contract is not open source, return the data and reason for failure
       return {
         success: false,
@@ -169,26 +156,24 @@ class GoPlusAudit {
     }
 
     // Check if trading is secure
-    const isTradingSecure = tradingSecurityChecks.every(
-      (check) => data[check] === "0"
-    );
+    const isTradingSecure = tradingSecurityChecks.every(check => data[check] === '0');
 
     if (!isTradingSecure) {
       // If the trading is not secure, return the data and reason for failure
       return {
         success: false,
         data: data,
-        reason: "Unknown buy/sell tax",
+        reason: 'Unknown buy/sell tax',
       };
     }
 
     // Check if the buy/sell tax is unknown
-    if (data.buy_tax === "" || data.sell_tax === "") {
+    if (data.buy_tax === '' || data.sell_tax === '') {
       // If the buy/sell tax is unknown, return the data and reason for failure
       return {
         success: false,
         data: data,
-        reason: "Unknown buy/sell tax",
+        reason: 'Unknown buy/sell tax',
       };
     }
 
@@ -204,7 +189,7 @@ class GoPlusAudit {
       return {
         success: false,
         data: { ...data },
-        reason: "Buy/Sell tax too high",
+        reason: 'Buy/Sell tax too high',
       };
     }
   }
@@ -217,31 +202,22 @@ class GoPlusAudit {
    */
   async main() {
     // Get the security results
-    const securityResults = await this.securityCheck(
-      this.chainId,
-      this.newTokenAddress
-    );
+    const securityResults = await this.securityCheck(this.chainId, this.newTokenAddress);
 
+    // If it fails the security check return
     if (!securityResults.success) {
       return {
         success: false,
         data: { ...securityResults.data },
-        reason: securityResults.reason,
       };
     }
 
     // Get the malicious results
-    const maliciousResults = await this.maliciousCheck(
-      this.chainId,
-      this.newTokenAddress
-    );
+    const maliciousResults = await this.maliciousCheck(this.chainId, this.newTokenAddress);
 
     return {
-      success: securityResults.success,
+      success: true,
       data: { ...securityResults.data, ...maliciousResults },
     };
   }
 }
-
-module.exports = (parent, chainId, newTokenAddress) =>
-  new GoPlusAudit(parent, chainId, newTokenAddress).main();

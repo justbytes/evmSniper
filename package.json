@@ -4,25 +4,21 @@
   "version": "1.0.0",
   "main": "src/index.js",
   "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
   "dependencies": {
     "@goplus/sdk-node": "^1.0.12",
-    "@types/node": "^22.15.29",
     "@uniswap/sdk-core": "^5.3.1",
     "@uniswap/v2-periphery": "^1.1.0-beta.0",
     "@uniswap/v2-sdk": "^4.4.0",
-    "@uniswap/v3-sdk": "^3.13.1",
+    "@uniswap/v3-sdk": "^3.8.3",
     "alchemy-sdk": "^3.4.1",
     "bignumber": "^1.1.0",
     "dotenv": "^16.4.5",
     "esbuild": "^0.25.5",
-    "esrun": "^3.2.30",
+    "esrun": "^0.0.1",
     "ethers": "^6.12.1",
-    "typescript": "^5.8.3",
     "ws": "^8.18.0"
-  },
-  "scripts": {
-    "dev": "npx esrun src/index.js",
-    "build": "tsc --noEmit && esrun esbuild.config.js",
-    "start": "npx esrun dist/bundle.js"
   }
 }

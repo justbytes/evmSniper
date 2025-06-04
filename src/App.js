@@ -1,6 +1,6 @@
-import WebSocket from "ws";
+import WebSocket from 'ws';
 
-class App {
+export class App {
   // Create a map to store the dodoEggs
   newTokens = new Map();
   wss;
@@ -23,30 +23,30 @@ class App {
     // Get the dodoEgg from the map
     const newToken = this.newTokens.get(id);
 
-    console.log("ID ", id);
-    console.log("RESULTS", results);
+    console.log('ID ', id);
+    console.log('RESULTS', results);
 
     // If the audit was not successful, remove the pair from the Map
     if (!newToken.auditResults.success) {
-      console.log("************* |   AUDIT FAILED   | *************");
+      console.log('************* |   AUDIT FAILED   | *************');
 
       // Log the reason
       if (newToken.auditResults.mythrilAudit === null) {
         console.log(newToken.auditResults.goPlusAudit.reason);
       } else if (newToken.auditResults.mythrilAudit.success === false) {
-        console.log("Failed Mythril Audit");
+        console.log('Failed Mythril Audit');
       } else {
-        console.log("Unknown failure reason");
+        console.log('Unknown failure reason');
       }
-      console.log("");
+      console.log('');
 
       // Remove the pair from the Map
       this.newTokens.delete(id);
       return;
     }
 
-    console.log("************* |   AUDIT SUCCESS   | *************");
-    console.log("");
+    console.log('************* |   AUDIT SUCCESS   | *************');
+    console.log('');
 
     // Add the dodoEgg to the trader queue to see if it can be traded
     //this.trader.add(dodoEgg);
@@ -74,5 +74,3 @@ class App {
     return;
   }
 }
-
-module.exports = App;

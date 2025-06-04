@@ -1,19 +1,17 @@
-import { WebSocketServer } from "ws";
-import { EventEmitter } from "events";
+import { WebSocketServer } from 'ws';
+import { EventEmitter } from 'events';
 
 export class WebSocketController extends EventEmitter {
   constructor(port = 8069) {
     super();
     this.port = port;
     this.wss = null;
-    this.newtokens = new Map();
-    this.audit = new Set();
     this.isRunning = false;
   }
 
   async startServer() {
     if (this.isRunning) {
-      console.log("Server already running");
+      console.log('Server already running');
       return;
     }
 
@@ -27,15 +25,15 @@ export class WebSocketController extends EventEmitter {
       this.isRunning = true;
 
       console.log(`WebSocket server started on port ${this.port}`);
-      this.emit("serverStarted", this.port);
+      this.emit('serverStarted', this.port);
     } catch (error) {
-      console.error("Failed to start WebSocket server:", error);
+      console.error('Failed to start WebSocket server:', error);
       throw error;
     }
   }
 
   setupEventHandlers() {
-    this.wss.on("connection", (ws, request) => {
+    this.wss.on('connection', (ws, request) => {
       console.log(`New connection from ${request.socket.remoteAddress}`);
 
       // Add connection metadata
@@ -45,80 +43,81 @@ export class WebSocketController extends EventEmitter {
       this.handleConnection(ws);
     });
 
-    this.wss.on("error", (error) => {
-      console.error("WebSocket server error:", error);
-      this.emit("error", error);
+    this.wss.on('error', error => {
+      console.error('WebSocket server error:', error);
+      this.emit('error', error);
     });
   }
 
   handleConnection(ws) {
     // Set up ping/pong for connection health
     ws.isAlive = true;
-    ws.on("pong", () => {
+    ws.on('pong', () => {
       ws.isAlive = true;
     });
 
-    ws.on("message", async (data) => {
+    ws.on('message', async rawData => {
       try {
-        const newToken = await this.deserializeData(data);
-        console.log("");
-        console.log("***** NEW TOKEN *****\n", newToken);
-        console.log("");
+        const data = await this.deserializeData(rawData);
+        console.log('');
+        console.log('***** DATA *****\n', data);
+        console.log('');
 
-        if (!newToken) {
-          ws.send(JSON.stringify({ error: "Invalid data format" }));
+        if (!data) {
+          console.log('Invalid data format');
+          ws.send(JSON.stringify({ error: 'Invalid data format' }));
           return;
         }
 
+        if (data.action == 'audit') {
+          console.log('going to run an audit');
+        } else if (data.action == 'trade') {
+          console.log('going to run a trade');
+        }
+
         // Store the newToken
-        this.newTokens.set(newToken.id, {
+        this.newTokens.set(newToken.newTokenAddress, {
           ...newToken,
           createdAt: new Date(),
         });
 
         // Add to audit queue
-        this.audit.add({
-          id: newToken.id,
-          chainId: newToken.chainId,
-          newTokenAddress: newToken.newTokenAddress,
-          timestamp: new Date(),
-        });
+        this.audit.addToQueue(newToken);
 
         // Acknowledge receipt
         ws.send(
           JSON.stringify({
-            type: "ack",
-            id: newToken.id,
-            status: "received",
+            type: 'ack',
+            status: 'received',
           })
         );
 
         console.log(`Processed newtoken egg: ${newToken.id}`);
-        this.emit("NewToken", newToken);
+        this.emit('NewToken', newToken);
       } catch (error) {
-        console.error("Error processing message:", error);
+        console.error('Error processing message:', error);
         ws.send(
           JSON.stringify({
-            error: "Failed to process message",
+            error: 'Failed to process message',
             details: error.message,
           })
         );
       }
     });
 
-    ws.on("close", (code, reason) => {
+    ws.on('close', (code, reason) => {
       console.log(`Connection ${ws.id} closed: ${code} - ${reason}`);
       this.handleDisconnection(ws);
     });
 
-    ws.on("error", (error) => {
+    ws.on('error', error => {
       console.error(`Connection ${ws.id} error:`, error);
     });
   }
 
   handleDisconnection(ws) {
     // Clean up any connection-specific data
-    this.emit("connectionClosed", ws.id);
+    this.emit('connectionClosed', ws.id);
 
     // TODO: Implement your save logic here
     this.saveDataToFile();
@@ -137,9 +136,9 @@ export class WebSocketController extends EventEmitter {
   async pingServer() {
     if (!this.wss) return false;
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const interval = setInterval(() => {
-        this.wss.clients.forEach((ws) => {
+        this.wss.clients.forEach(ws => {
           if (ws.isAlive === false) {
             console.log(`Terminating inactive connection ${ws.id}`);
             return ws.terminate();
@@ -158,11 +157,11 @@ export class WebSocketController extends EventEmitter {
 
   async stopServer() {
     if (!this.isRunning) {
-      console.log("Server not running");
+      console.log('Server not running');
       return;
     }
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       // Clear ping interval
       if (this.pingInterval) {
         clearInterval(this.pingInterval);
@@ -172,15 +171,15 @@ export class WebSocketController extends EventEmitter {
       this.saveDataToFile();
 
       // Close all connections gracefully
-      this.wss.clients.forEach((ws) => {
-        ws.close(1000, "Server shutting down");
+      this.wss.clients.forEach(ws => {
+        ws.close(1000, 'Server shutting down');
       });
 
       // Close server
       this.wss.close(() => {
         this.isRunning = false;
-        console.log("WebSocket server stopped");
-        this.emit("serverStopped");
+        console.log('WebSocket server stopped');
+        this.emit('serverStopped');
         resolve();
       });
     });
@@ -212,7 +211,7 @@ export class WebSocketController extends EventEmitter {
     if (!this.wss) return;
 
     const data = JSON.stringify(message);
-    this.wss.clients.forEach((ws) => {
+    this.wss.clients.forEach(ws => {
       if (ws.readyState === ws.OPEN) {
         ws.send(data);
       }
