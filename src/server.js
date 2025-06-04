@@ -1,7 +1,6 @@
 import { WebSocketServer } from "ws";
 import { EventEmitter } from "events";
-import { rugpullDetection } from "./audit/rugpullDetection.js";
-import { tokenSecurity } from "./audit/tokenSecurity.js";
+import { rugpullDetection, tokenSecurity, rateLimiter } from "./audit/index.js";
 
 export class WebSocketController extends EventEmitter {
   constructor(port = 8069) {
@@ -9,6 +8,7 @@ export class WebSocketController extends EventEmitter {
     this.port = port;
     this.wss = null;
     this.isRunning = false;
+    this.rateLimiterMonitor = null;
   }
 
   async startServer() {
@@ -24,6 +24,7 @@ export class WebSocketController extends EventEmitter {
       });
 
       this.setupEventHandlers();
+      this.startRateLimiterMonitor();
       this.isRunning = true;
 
       console.log(`WebSocket server started on port ${this.port}`);
@@ -32,6 +33,19 @@ export class WebSocketController extends EventEmitter {
       console.error("Failed to start WebSocket server:", error);
       throw error;
     }
+  }
+
+  startRateLimiterMonitor() {
+    // Monitor rate limiter status every 30 seconds
+    this.rateLimiterMonitor = setInterval(() => {
+      const status = rateLimiter.getStatus();
+      console.log(
+        `[Rate Limiter Status] Calls: ${status.callsInWindow}/${status.maxCalls}, Queue: ${status.queueLength}, Throttled: ${status.isThrottled}`
+      );
+
+      // Emit status for any listeners
+      this.emit("rateLimiterStatus", status);
+    }, 30000);
   }
 
   setupEventHandlers() {
@@ -68,7 +82,17 @@ export class WebSocketController extends EventEmitter {
           return;
         }
 
-        // Run a security audit for rugpull detecition
+        // Send rate limiter status before processing
+        const rateLimiterStatus = rateLimiter.getStatus();
+
+        // Display current audit queue stats
+        console.log(`[Rate Limiter] Current status:`, {
+          calls: `${rateLimiterStatus.callsInWindow}/${rateLimiterStatus.maxCalls}`,
+          queueLength: rateLimiterStatus.queueLength,
+          waitTime: `${rateLimiterStatus.waitTime}ms`,
+        });
+
+        // Run a security audit for rugpull detection
         const rugCheck = await rugpullDetection(
           token.chainId,
           token.newTokenAddress
@@ -76,6 +100,9 @@ export class WebSocketController extends EventEmitter {
 
         // Stop if its token is unsafe
         if (!rugCheck.success) {
+          // console.log(
+          //   `[Token Audit] Rugpull check failed for ${token.newTokenAddress}`
+          // );
           return;
         }
 
@@ -87,6 +114,9 @@ export class WebSocketController extends EventEmitter {
 
         // Stop if token is unsafe
         if (!securityCheck.success) {
+          // console.log(
+          //   `[Token Audit] Security check failed for ${token.newTokenAddress}`
+          // );
           return;
         }
 
@@ -98,15 +128,26 @@ export class WebSocketController extends EventEmitter {
         // Add the audit results to the token
         token = {
           ...token,
-          auditResults: { ...securityCheck.results, ...rugCheck.results }, // Fixed typo: "auditResutls" -> "auditResults"
+          auditResults: { ...securityCheck.results, ...rugCheck.results },
           timestamp: new Date().toISOString(),
         };
 
-        // Acknowledge receipt
+        // Log final rate limiter status after processing
+        const finalStatus = rateLimiter.getStatus();
+        console.log(`[Rate Limiter] After processing:`, {
+          calls: `${finalStatus.callsInWindow}/${finalStatus.maxCalls}`,
+          queueLength: finalStatus.queueLength,
+        });
+
+        // Optionally send acknowledgment with rate limiter info
         // ws.send(
         //   JSON.stringify({
         //     type: "ack",
-        //     status: "received",
+        //     status: "processed",
+        //     rateLimiter: {
+        //       callsRemaining: finalStatus.maxCalls - finalStatus.callsInWindow,
+        //       queueLength: finalStatus.queueLength
+        //     }
         //   })
         // );
       } catch (error) {
@@ -182,6 +223,11 @@ export class WebSocketController extends EventEmitter {
         clearInterval(this.pingInterval);
       }
 
+      // Clear rate limiter monitor
+      if (this.rateLimiterMonitor) {
+        clearInterval(this.rateLimiterMonitor);
+      }
+
       // Save data before closing
       this.saveDataToFile();
 
@@ -212,9 +258,11 @@ export class WebSocketController extends EventEmitter {
 
   // Utility methods
   getStats() {
+    const rateLimiterStatus = rateLimiter.getStatus();
     return {
       isRunning: this.isRunning,
       connectedClients: this.wss ? this.wss.clients.size : 0,
+      rateLimiter: rateLimiterStatus,
     };
   }
 
@@ -227,5 +275,16 @@ export class WebSocketController extends EventEmitter {
         ws.send(data);
       }
     });
+  }
+
+  // Get rate limiter status
+  getRateLimiterStatus() {
+    return rateLimiter.getStatus();
+  }
+
+  // Reset rate limiter (emergency use)
+  resetRateLimiter() {
+    console.log("⚠️  Resetting rate limiter - use with caution!");
+    rateLimiter.reset();
   }
 }

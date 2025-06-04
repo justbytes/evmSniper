@@ -19,7 +19,7 @@ export const rugpullDetection = async (chainId, address) => {
   ) {
     // If we have been rate limited wait 1 seconds
     if (response.code == 4029) {
-      console.log("Rate limited, waiting 1 second...");
+      console.log("Rate limited, waiting 10 second...");
       await new Promise((resolve) => setTimeout(resolve, 10000));
       return await rugpullDetection(chainId, address);
     }
