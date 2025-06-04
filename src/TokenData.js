@@ -1,5 +1,5 @@
 const { Alchemy } = require("alchemy-sdk");
-const getAlchemySettings = require("../utils/getAlchemySettings");
+const getAlchemySettings = require("./utils/getAlchemySettings");
 
 class TokenData {
   /**

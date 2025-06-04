@@ -1,4 +1,4 @@
-const { GoPlus } = require("@goplus/sdk-node");
+import GoPlus from "@goplus/sdk-node";
 
 /**
  * @class GoPlusAudit
@@ -9,10 +9,10 @@ class GoPlusAudit {
    * @constructor
    * @description This constructor is used to initialize the GoPlusAudit class
    */
-  constructor(parent, chainId, newTokenAddress) {
-    this.parent = parent;
+  constructor(chainId, newTokenAddress) {
     this.chainId = chainId;
     this.newTokenAddress = newTokenAddress;
+    this.count = 0;
   }
 
   /**
@@ -23,7 +23,7 @@ class GoPlusAudit {
    */
   async maliciousCheck() {
     // Wait for 1 second if counter is greater than 30
-    while (this.parent.goPlusCalls >= 30) {
+    while (this.count >= 30) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
@@ -35,7 +35,7 @@ class GoPlusAudit {
       );
 
       // Increment the number of audits calls
-      this.parent.goPlusCalls++;
+      this.count++;
       return response.result;
     } catch (error) {
       console.log(
@@ -63,7 +63,7 @@ class GoPlusAudit {
     const fetchData = async () => {
       let response;
       // Wait for the counter to be less than 30
-      while (this.parent.goPlusCalls >= 30) {
+      while (this.count >= 30) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
@@ -77,7 +77,7 @@ class GoPlusAudit {
         );
 
         // Increment the number of audits calls
-        this.parent.goPlusCalls++;
+        this.count++;
       } catch (error) {
         // Retry if it fails 12 times
         if (retryCount < MAX_RETRIES) {
@@ -165,7 +165,6 @@ class GoPlusAudit {
       return {
         success: false,
         data: data,
-        reason: "Contract is not open source",
       };
     }
 
@@ -240,7 +239,6 @@ class GoPlusAudit {
     return {
       success: securityResults.success,
       data: { ...securityResults.data, ...maliciousResults },
-      reason: securityResults.success ? null : securityResults.reason,
     };
   }
 }

@@ -1,20 +1,18 @@
-const { ethers } = require("ethers");
+import { ethers } from "ethers";
 
-const {
-  abi: IUniswapV2PairABI,
-} = require("@uniswap/v2-core/build/UniswapV2Pair.json");
+import { IUniswapV2PairABI } from "@uniswap/v2-core/build/UniswapV2Pair.json";
 
 /**
  * Gets the price of the pair
  * @returns the price in terms of base token
  */
-const v2GetPrice = async () => {
+const v2GetPriceWithPairAddress = async (pairAddress) => {
   let token0, token1, pairContract;
 
   // Get the pair contract
   try {
     pairContract = new ethers.Contract(
-      this.dodoEgg.pairAddress,
+      pairAddress,
       IUniswapV2PairABI,
       await this.alchemy.config.getProvider()
     );
@@ -28,6 +26,7 @@ const v2GetPrice = async () => {
 
   console.log("RESERVE0 FROM GET PRICE", reserve0);
   console.log("RESERVE1 FROM GET PRICE", reserve1);
+
   // Get the token0 and token1 addresses
   try {
     token0 = await pairContract.token0();
@@ -99,7 +98,7 @@ const v2TargetListener = async () => {
     console.log("Checking sync for updated price");
 
     // Check the price movement to see is it went above the targetPrice
-    this.processPriceMovement(log);
+    decodeSyncLog(log);
   };
 
   // Listen to sync events
@@ -112,7 +111,7 @@ const v2TargetListener = async () => {
  * Decode v2 data from listener
  * @param log
  */
-const v2ProcessPriceMovement = (log) => {
+const decodeSyncLog = (log) => {
   let currentPrice, reserve;
 
   // Decode log data
@@ -188,5 +187,4 @@ const v2ProcessPriceMovement = (log) => {
 module.exports = {
   v2GetPrice,
   v2TargetListener,
-  v2ProcessPriceMovement,
 };

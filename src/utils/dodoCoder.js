@@ -1,5 +1,5 @@
 const { v4: uuidv4 } = require("uuid");
-const DodoEgg = require("../models/TokenData");
+const DodoEgg = require("../TokenData");
 
 /**
  * JSON data that should be parsed and converted into a DodoEgg object

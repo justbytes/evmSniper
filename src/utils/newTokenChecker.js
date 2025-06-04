@@ -1,5 +1,5 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
 
 const KNOWN_TOKENS_JSON = path.join(__dirname, "../../data/known_tokens.json");
 const KNOWN_TOKEN_DATA = fs.readFileSync(KNOWN_TOKENS_JSON);
@@ -10,7 +10,7 @@ const KNOWN_TOKENS = JSON.parse(KNOWN_TOKEN_DATA);
  * @param {string} targetAddress
  * @returns
  */
-const checkList = (targetAddress) => {
+export const isBaseToken = (targetAddress) => {
   for (let i = 0; i < KNOWN_TOKENS.length; i++) {
     let knownAddress = KNOWN_TOKENS[i];
     if (targetAddress.toLowerCase() === knownAddress.toLowerCase()) {
@@ -26,7 +26,7 @@ const checkList = (targetAddress) => {
  * @param {string} token1
  * @returns
  */
-const checkIfTokenIsNew = (token0, token1) => {
+export const checkIfTokenIsNew = (token0, token1) => {
   let count = 0;
   let baseToken;
   let newToken;
@@ -54,5 +54,3 @@ const checkIfTokenIsNew = (token0, token1) => {
 
   return { newToken, baseToken };
 };
-
-module.exports = checkIfTokenIsNew;

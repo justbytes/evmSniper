@@ -1,5 +1,4 @@
-const GoPlusAudit = require("./audits/GoPlusAudit");
-const MythrilAudit = require("./audits/MythrilAudit");
+import GoPlusAudit from "./audits/GoPlusAudit";
 
 /**
  * Runs the GoPlus and Mythril audits and returns the results
@@ -44,7 +43,6 @@ class Audit {
   add(data) {
     // Create an object to store the audit data
     const dodo = {
-      id: data.id,
       chainId: data.chainId,
       newTokenAddress: data.newTokenAddress,
       goPlusResults: null,
@@ -131,7 +129,7 @@ class Audit {
         };
 
         // Send the results to the app
-        this.app.processAudit(dodo.id, results);
+        this.processAudit(dodo.id, results);
       }
 
       // Remove the dodo from the GoPlus Queue
@@ -140,6 +138,41 @@ class Audit {
       // Remove the dodo from the running audits
       this.goPlusRunning.delete(dodo.id);
     }
+  }
+
+  async processAudit(id, results) {
+    // Get the dodoEgg from the map
+    const newToken = this.newTokens.get(id);
+
+    console.log("ID ", id);
+    console.log("RESULTS", results);
+
+    // If the audit was not successful, remove the pair from the Map
+    if (!newToken.auditResults.success) {
+      console.log("************* |   AUDIT FAILED   | *************");
+
+      // Log the reason
+      if (newToken.auditResults.mythrilAudit === null) {
+        console.log(newToken.auditResults.goPlusAudit.reason);
+      } else if (newToken.auditResults.mythrilAudit.success === false) {
+        console.log("Failed Mythril Audit");
+      } else {
+        console.log("Unknown failure reason");
+      }
+      console.log("");
+
+      // Remove the pair from the Map
+      this.newTokens.delete(id);
+      return;
+    }
+
+    console.log("************* |   AUDIT SUCCESS   | *************");
+    console.log("");
+
+    // Add the dodoEgg to the trader queue to see if it can be traded
+    //this.trader.add(dodoEgg);
+
+    return;
   }
 }
 
