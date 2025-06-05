@@ -102,10 +102,8 @@ export class UniswapV2 {
       const path = [this.wethAddress, tokenAddress]; // WETH to token path
       const amountIn = ethers.parseEther(ethAmount.toString()); // Amount of ETH to spend
 
-      // Check ETH balance first
-      const ethBalance = await this.alchemy.core.getBalance(
-        this.wallet.address
-      );
+      // Check ETH balance first - FIXED: removed parameter
+      const ethBalance = await this.getETHBalance();
       console.log(ethBalance);
 
       console.log(`ETH Balance: ${ethers.formatEther(ethBalance)} ETH`);
@@ -123,10 +121,7 @@ export class UniswapV2 {
         1000n;
 
       console.log(`🔥 Buying ${ethAmount} ETH worth of tokens...`);
-      console.log("ExpectedOut: ", expectedOut);
-
-      // Get optimal gas pricing from Alchemy
-      const gasInfo = await this.getOptimalGasPrice();
+      console.log("Expected Out: ", expectedOut);
 
       // Estimate gas for the transaction
       const gasEstimate =
@@ -138,11 +133,18 @@ export class UniswapV2 {
           { value: amountIn }
         );
 
-      // Add 20% buffer to gas estimate
-      const gasLimit = (gasEstimate * 120n) / 100n;
+      // Convert to BigInt and add 20% buffer
+      const gasEstimateBigInt = gasEstimate.toBigInt
+        ? gasEstimate.toBigInt()
+        : BigInt(gasEstimate);
+      const gasLimit = (gasEstimateBigInt * 120n) / 100n;
 
-      // Calculate total gas cost
-      const gasCost = gasLimit * (gasInfo.maxFeePerGas || gasInfo.gasPrice);
+      // Calculate gas cost using Alchemy provider
+      const gasPrice = await this.alchemy.core.getGasPrice();
+      const gasPriceBigInt = gasPrice.toBigInt
+        ? gasPrice.toBigInt()
+        : BigInt(gasPrice);
+      const gasCost = gasLimit * gasPriceBigInt;
 
       console.log(`Estimated gas: ${gasEstimate.toString()}`);
       console.log(`Gas limit (with buffer): ${gasLimit.toString()}`);
@@ -162,18 +164,10 @@ export class UniswapV2 {
       let txOptions = {
         value: amountIn,
         gasLimit: gasLimit,
+        gasPrice: gasPriceBigInt, // Add gas price to options
       };
 
-      // Use EIP-1559 gas pricing if available, otherwise legacy
-      if (gasInfo.maxFeePerGas && gasInfo.maxPriorityFeePerGas) {
-        txOptions.maxFeePerGas = gasInfo.maxFeePerGas;
-        txOptions.maxPriorityFeePerGas = gasInfo.maxPriorityFeePerGas;
-        console.log("Using EIP-1559 gas pricing");
-      } else {
-        txOptions.gasPrice = gasInfo.gasPrice;
-        console.log("Using legacy gas pricing");
-      }
-
+      // Make the swap
       const tx = await this.routerContract.swapExactETHForTokens(
         minAmountOut,
         path,
@@ -183,8 +177,28 @@ export class UniswapV2 {
       );
 
       console.log(`Transaction sent: ${tx.hash}`);
-      const receipt = await tx.wait();
-      console.log(`Transaction confirmed in block: ${receipt.blockNumber}`);
+      let receipt = null;
+      for (let i = 0; i < 6; i++) {
+        // Try 6 times (30 seconds total)
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 5 seconds each time
+          receipt = await this.alchemy.core.getTransactionReceipt(tx.hash);
+          if (receipt && receipt.blockNumber) {
+            console.log(
+              `Transaction confirmed in block: ${receipt.blockNumber}`
+            );
+            break;
+          }
+        } catch (error) {
+          console.log(`Attempt ${i + 1}: Receipt not ready yet...`);
+        }
+      }
+
+      if (!receipt) {
+        console.warn(
+          "Transaction sent but could not confirm receipt after 30 seconds"
+        );
+      }
 
       // Store position info
       this.positions.set(tokenAddress, {
@@ -206,78 +220,167 @@ export class UniswapV2 {
     }
   }
 
+  /**
+   * Sells tokens
+   * @param {*} tokenAddress
+   * @param {*} tokenAmount
+   * @param {*} options
+   * @returns
+   */
   async sellToken(tokenAddress, tokenAmount, options = {}) {
     try {
-      const {
-        slippage = this.slippageTolerance,
-        gasPrice,
-        gasLimit = this.gasLimit,
-        deadline = Math.floor(Date.now() / 1000) + 1200,
-      } = options;
+      const deadline = Math.floor(Date.now() / 1000) + 120;
+      const path = [tokenAddress, this.wethAddress];
 
+      // DEBUG: Get token info
+      const decimals = await this.getTokenDecimals(tokenAddress);
+      const tokenBalance = await this.getTokenBalance(tokenAddress);
+      const tokenInfo = await this.getTokenInfo(tokenAddress);
+
+      console.log(`📊 Token Info: ${tokenInfo?.name} (${tokenInfo?.symbol})`);
+      console.log(
+        `📊 Token Balance: ${ethers.formatUnits(tokenBalance, decimals)}`
+      );
+      console.log(`📊 Decimals: ${decimals}`);
+
+      // Use the full balance instead of tokenAmount parameter for now
+      const amountIn = tokenBalance;
+
+      if (amountIn === 0n) {
+        throw new Error("No tokens to sell!");
+      }
+
+      console.log(
+        `💰 Selling ${ethers.formatUnits(amountIn, decimals)} tokens...`
+      );
+
+      // CRITICAL: Check and approve token spending first
       const tokenContract = new ethers.Contract(
         tokenAddress,
         ERC20_ABI,
         this.wallet
       );
-      const decimals = await this.getTokenDecimals(tokenAddress);
-      const amountIn = ethers.parseUnits(tokenAmount.toString(), decimals);
 
-      // Check and approve if necessary
       const allowance = await tokenContract.allowance(
         this.wallet.address,
         this.routerAddress
-      ); // FIXED
-      if (allowance < amountIn) {
-        console.log("Approving token spend...");
-        const approveTx = await tokenContract.approve(
-          this.routerAddress,
-          ethers.MaxUint256
-        ); // FIXED
-        await approveTx.wait();
-      }
-
-      const path = [tokenAddress, this.wethAddress];
-      const amountsOut = await this.routerContract.getAmountsOut(
-        amountIn,
-        path
-      ); // FIXED
-      const expectedOut = amountsOut[1];
-      const minAmountOut =
-        (expectedOut * BigInt(Math.floor((1 - slippage) * 1000))) / 1000n;
-
-      console.log(`💰 Selling ${tokenAmount} tokens...`);
-      console.log(`Expected ETH: ${ethers.formatEther(expectedOut)}`);
-
-      const txOptions = { gasLimit };
-      if (gasPrice) txOptions.gasPrice = gasPrice;
-
-      const tx = await this.routerContract.swapExactTokensForETH(
-        // FIXED
-        amountIn,
-        minAmountOut,
-        path,
-        this.wallet.address,
-        deadline,
-        txOptions
       );
 
-      const receipt = await tx.wait();
+      console.log(
+        `🔍 Current allowance: ${ethers.formatUnits(allowance, decimals)}`
+      );
+      console.log(
+        `🔍 Amount to sell: ${ethers.formatUnits(amountIn, decimals)}`
+      );
 
-      // Update position info
-      if (this.positions.has(tokenAddress)) {
-        const position = this.positions.get(tokenAddress);
-        position.exitPrice = await this.getPrice(tokenAddress);
-        position.exitTime = Date.now();
-        position.sellTxHash = tx.hash;
+      if (allowance < amountIn) {
+        console.log("🔓 Approving token spend...");
+        try {
+          const approveTx = await tokenContract.approve(
+            this.routerAddress,
+            ethers.MaxUint256 // Approve unlimited
+          );
+          console.log(`Approval transaction sent: ${approveTx.hash}`);
+
+          // Wait longer for approval to be confirmed
+          console.log("⏳ Waiting for approval to be confirmed...");
+          for (let i = 0; i < 10; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds each time
+            const newAllowance = await tokenContract.allowance(
+              this.wallet.address,
+              this.routerAddress
+            );
+            console.log(
+              `Checking allowance... ${ethers.formatUnits(
+                newAllowance,
+                decimals
+              )}`
+            );
+            if (newAllowance >= amountIn) {
+              console.log("✅ Approval confirmed!");
+              break;
+            }
+          }
+        } catch (approveError) {
+          console.error("Approval failed:", approveError);
+          throw new Error(`Approval failed: ${approveError.message}`);
+        }
       }
 
-      return {
-        success: true,
-        txHash: tx.hash,
-        receipt: receipt,
-        ethReceived: expectedOut,
-      };
+      // DEBUG: Test if we can get amounts out
+      console.log("🔍 Testing getAmountsOut...");
+      try {
+        const amountsOut = await this.routerContract.getAmountsOut(
+          amountIn,
+          path
+        );
+        console.log(
+          `✅ Expected output: ${ethers.formatEther(amountsOut[1])} ETH`
+        );
+
+        const expectedOut = amountsOut[1];
+        const minAmountOut =
+          (expectedOut *
+            BigInt(Math.floor((1 - this.slippageTolerance) * 1000))) /
+          1000n;
+
+        console.log(
+          `🎯 Min amount out: ${ethers.formatEther(minAmountOut)} ETH`
+        );
+
+        // DEBUG: Try gas estimation with detailed error
+        console.log("🔍 Testing gas estimation...");
+        try {
+          const gasEstimate =
+            await this.routerContract.swapExactTokensForETH.estimateGas(
+              amountIn,
+              minAmountOut,
+              path,
+              this.wallet.address,
+              deadline
+            );
+
+          console.log(`✅ Gas estimate successful: ${gasEstimate.toString()}`);
+
+          // If we get here, proceed with the transaction
+          const gasEstimateBigInt = gasEstimate.toBigInt
+            ? gasEstimate.toBigInt()
+            : BigInt(gasEstimate);
+          const gasLimit = (gasEstimateBigInt * 120n) / 100n;
+
+          const gasPrice = await this.alchemy.core.getGasPrice();
+          const gasPriceBigInt = gasPrice.toBigInt
+            ? gasPrice.toBigInt()
+            : BigInt(gasPrice);
+
+          const txOptions = {
+            gasLimit: gasLimit,
+            gasPrice: gasPriceBigInt,
+          };
+
+          const tx = await this.routerContract.swapExactTokensForETH(
+            amountIn,
+            minAmountOut,
+            path,
+            this.wallet.address,
+            deadline,
+            txOptions
+          );
+
+          console.log(`🚀 Transaction sent: ${tx.hash}`);
+          return {
+            success: true,
+            txHash: tx.hash,
+            ethReceived: expectedOut,
+          };
+        } catch (gasError) {
+          console.error("❌ Gas estimation failed:", gasError);
+          throw new Error(`Gas estimation failed: ${gasError.message}`);
+        }
+      } catch (amountsError) {
+        console.error("❌ getAmountsOut failed:", amountsError);
+        throw new Error(`getAmountsOut failed: ${amountsError.message}`);
+      }
     } catch (error) {
       console.error("Sell failed:", error);
       return { success: false, error: error.message };
@@ -637,31 +740,8 @@ async function main() {
 
   await uni.initialize();
 
-  const data = await uni.getTargetAndStopLoss(
-    "0x4B6104755AfB5Da4581B81C552DA3A25608c73B8"
-  );
+  await uni.sellToken("0x4B6104755AfB5Da4581B81C552DA3A25608c73B8");
 
-  const tokenConfig = {
-    tokenAddress: "0x4B6104755AfB5Da4581B81C552DA3A25608c73B8",
-    targetPrice: data.targetPrice,
-    stopLoss: data.stopLoss,
-    pairAddress: "0xa46d5090499eFB9c5dD7d95F7ca69F996b9Fb761",
-  };
-
-  console.log(tokenConfig);
-
-  console.log(await uni.startTargetListener(tokenConfig));
-
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-
-  console.log(uni.getActiveListeners());
-
-  await new Promise((resolve) => setTimeout(resolve, 5000));
-
-  console.log(
-    await uni.stopTargetListener("0x4B6104755AfB5Da4581B81C552DA3A25608c73B8")
-  );
-
-  //await uni.buyToken("0x4B6104755AfB5Da4581B81C552DA3A25608c73B8");
+  //console.log(uni.getPositions());
 }
 main();
