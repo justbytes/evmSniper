@@ -1,9 +1,8 @@
-import { ethers } from 'ethers'; // Import ethers instead of Alchemy Wallet
-import { Alchemy } from 'alchemy-sdk';
-import util from 'util';
-import { exec } from 'child_process';
-import dotenv from 'dotenv';
-import { getAlchemySettings } from '../utils/getAlchemySettings.js';
+import { Alchemy, Wallet } from "alchemy-sdk";
+import util from "util";
+import { exec } from "child_process";
+import dotenv from "dotenv";
+import { getAlchemySettings } from "../utils/getAlchemySettings.js";
 
 const execPromise = util.promisify(exec);
 dotenv.config();
@@ -13,7 +12,7 @@ dotenv.config();
  * @param {*} chainId
  * @returns
  */
-export const getWallet = async chainId => {
+export const getWallet = async (chainId) => {
   // Create Alchemy provider
   const alchemy = new Alchemy(getAlchemySettings(String(chainId)));
 
@@ -31,5 +30,5 @@ export const getWallet = async chainId => {
 
   // Use ethers Wallet instead of Alchemy Wallet
   // Connect the wallet to the Alchemy provider
-  return new ethers.Wallet(privateKey, alchemy);
+  return new Wallet(privateKey, alchemy);
 };
