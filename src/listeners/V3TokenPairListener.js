@@ -72,7 +72,7 @@ export class V3TokenPairListener {
     let data;
 
     // Find out which token is new
-    const { newToken, baseToken } = findNewToken(token0, token1);
+    const { newToken, baseToken, newTokenIs0 } = findNewToken(token0, token1);
 
     // console.log("NewToken ", newToken);
     // console.log("BaseToken ", baseToken);
@@ -91,6 +91,7 @@ export class V3TokenPairListener {
       newTokenAddress: newToken,
       baseTokenAddress: baseToken,
       pairAddress: pool,
+      newTokenIs0,
       v3: true,
       fee: fee.toString(),
     };

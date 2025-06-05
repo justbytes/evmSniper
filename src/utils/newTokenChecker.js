@@ -26,12 +26,14 @@ export const findNewToken = (token0, token1) => {
   let count = 0;
   let baseToken;
   let newToken;
+  let newTokenIs0;
 
   // Return true means its a known token
   if (isBaseToken(token0)) {
     count++;
     baseToken = token0;
     newToken = token1;
+    newTokenIs0 = false;
   }
 
   // Returning true means its a known token
@@ -39,6 +41,7 @@ export const findNewToken = (token0, token1) => {
     count++;
     baseToken = token1;
     newToken = token0;
+    newTokenIs0 = true;
   }
 
   // If both tokens are known or if neither token is known return false
@@ -48,5 +51,5 @@ export const findNewToken = (token0, token1) => {
     return { newToken: false, baseToken: false };
   }
 
-  return { newToken, baseToken };
+  return { newToken, baseToken, newTokenIs0 };
 };
