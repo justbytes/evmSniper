@@ -82,62 +82,10 @@ export class WebSocketController extends EventEmitter {
           return;
         }
 
-        // Send rate limiter status before processing
-        const rateLimiterStatus = rateLimiter.getStatus();
+        // Runs the GoPlus audits
+        token = await this.runAudit(token);
 
-        // Display current audit queue stats
-        console.log(`[Rate Limiter] Current status:`, {
-          calls: `${rateLimiterStatus.callsInWindow}/${rateLimiterStatus.maxCalls}`,
-          queueLength: rateLimiterStatus.queueLength,
-          waitTime: `${rateLimiterStatus.waitTime}ms`,
-        });
-
-        // Run a security audit for rugpull detection
-        const rugCheck = await rugpullDetection(
-          token.chainId,
-          token.newTokenAddress
-        );
-
-        // Stop if its token is unsafe
-        if (!rugCheck.success) {
-          // console.log(
-          //   `[Token Audit] Rugpull check failed for ${token.newTokenAddress}`
-          // );
-          return;
-        }
-
-        // Runs a detailed GoPlus token security check
-        const securityCheck = await tokenSecurity(
-          token.chainId,
-          token.newTokenAddress
-        );
-
-        // Stop if token is unsafe
-        if (!securityCheck.success) {
-          // console.log(
-          //   `[Token Audit] Security check failed for ${token.newTokenAddress}`
-          // );
-          return;
-        }
-
-        console.log(
-          "******   TOKEN PASSED AUDIT   ******\n",
-          token.newTokenAddress
-        );
-
-        // Add the audit results to the token
-        token = {
-          ...token,
-          auditResults: { ...securityCheck.results, ...rugCheck.results },
-          timestamp: new Date().toISOString(),
-        };
-
-        // Log final rate limiter status after processing
-        const finalStatus = rateLimiter.getStatus();
-        console.log(`[Rate Limiter] After processing:`, {
-          calls: `${finalStatus.callsInWindow}/${finalStatus.maxCalls}`,
-          queueLength: finalStatus.queueLength,
-        });
+        if (!token) return;
 
         // Optionally send acknowledgment with rate limiter info
         // ws.send(
@@ -152,12 +100,12 @@ export class WebSocketController extends EventEmitter {
         // );
       } catch (error) {
         console.error("Error processing message:", error);
-        ws.send(
-          JSON.stringify({
-            error: "Failed to process message",
-            details: error.message,
-          })
-        );
+        // ws.send(
+        //   JSON.stringify({
+        //     error: "Failed to process message",
+        //     details: error.message,
+        //   })
+        // );
       }
     });
 
@@ -244,6 +192,63 @@ export class WebSocketController extends EventEmitter {
         resolve();
       });
     });
+  }
+
+  /**
+   * Runs 2 GoPlus Security audits to see if the token is safe
+   * @param {*} token
+   * @returns
+   */
+  async runAudit(token) {
+    // Send rate limiter status before processing
+    const rateLimiterStatus = rateLimiter.getStatus();
+
+    // Display current audit queue stats
+    console.log(`[Rate Limiter] Current status:`, {
+      calls: `${rateLimiterStatus.callsInWindow}/${rateLimiterStatus.maxCalls}`,
+      queueLength: rateLimiterStatus.queueLength,
+      waitTime: `${rateLimiterStatus.waitTime}ms`,
+    });
+
+    // Runs a detailed GoPlus token security check
+    const securityCheck = await tokenSecurity(
+      token.chainId,
+      token.newTokenAddress
+    );
+
+    // Stop if token is unsafe
+    if (!securityCheck.success) {
+      // console.log(
+      //   `[Token Audit] Security check failed for ${token.newTokenAddress}`
+      // );
+      return false;
+    }
+
+    // Run a security audit for rugpull detection
+    const rugCheck = await rugpullDetection(
+      token.chainId,
+      token.newTokenAddress
+    );
+
+    // Stop if its token is unsafe
+    if (!rugCheck.success) {
+      // console.log(
+      //   `[Token Audit] Rugpull check failed for ${token.newTokenAddress}`
+      // );
+      return false;
+    }
+
+    console.log(
+      "******   TOKEN PASSED AUDIT   ******\n",
+      token.newTokenAddress
+    );
+
+    // Add the audit results to the token
+    return {
+      ...token,
+      auditResults: { ...securityCheck.results, ...rugCheck.results },
+      timestamp: new Date().toISOString(),
+    };
   }
 
   saveDataToFile() {

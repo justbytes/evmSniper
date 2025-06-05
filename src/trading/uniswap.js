@@ -1,17 +1,25 @@
-import { ethers } from 'ethers';
+import { ethers } from "ethers";
 
-import { v2GetPrice, v2TargetListener, v2ProcessPriceMovement } from './uniswapV2.js';
+import {
+  v2GetPrice,
+  v2TargetListener,
+  v2ProcessPriceMovement,
+} from "./uniswapV2.js";
 
-import { v3GetPrice, v3TargetListener, v3ProcessPriceMovement } from './uniswapV3.js';
+import {
+  v3GetPrice,
+  v3TargetListener,
+  v3ProcessPriceMovement,
+} from "./uniswapV3.js";
 
-import { ERC20_ABI } from '@openzeppelin/contracts/build/contracts/ERC20.json';
+import { ERC20_ABI } from "@openzeppelin/contracts/build/contracts/ERC20.json";
 
 /**
  * Gets the number of decimals for a token
  * @param tokenAddress
  * @returns the number of decimals
  */
-export const getTokenDecimals = async tokenAddress => {
+export const getTokenDecimals = async (tokenAddress) => {
   try {
     const tokenContract = new ethers.Contract(
       tokenAddress,
@@ -21,7 +29,7 @@ export const getTokenDecimals = async tokenAddress => {
     const decimals = await tokenContract.decimals();
     return decimals;
   } catch (error) {
-    console.error('There was a problem getting decimals! \n', error);
+    console.error("There was a problem getting decimals! \n", error);
   }
 
   /**
@@ -64,8 +72,8 @@ export const getTokenDecimals = async tokenAddress => {
    * @param {string} version
    * @returns the price
    */
-  const getPrice = async version => {
-    if (version === 'v2') {
+  const getPrice = async (version) => {
+    if (version === "v2") {
       return { price: await v2GetPrice() };
     } else {
       return { price: await v3GetPrice() };
@@ -73,9 +81,9 @@ export const getTokenDecimals = async tokenAddress => {
   };
 };
 
-export const startTargetListener = async version => {
+export const startTargetListener = async (version) => {
   // TODO: return a promise
-  if (version === 'v2') {
+  if (version === "v2") {
     await v2TargetListener();
   } else {
     await v3TargetListener();
@@ -88,7 +96,9 @@ export const startTargetListener = async version => {
  */
 export const getTargetListeners = async () => {
   // TODO: return a promise?
-  return await this.alchemy.ws.listenerCount(this.dodoEgg.targetListener.filters);
+  return await this.alchemy.ws.listenerCount(
+    this.dodoEgg.targetListener.filters
+  );
 };
 
 /**
@@ -96,7 +106,10 @@ export const getTargetListeners = async () => {
  */
 export const removeTargetListener = async () => {
   // TODO: return a promise?
-  this.alchemy.ws.off(this.dodoEgg.targetListener.filter, this.dodoEgg.targetListener.listener);
+  this.alchemy.ws.off(
+    this.dodoEgg.targetListener.filter,
+    this.dodoEgg.targetListener.listener
+  );
   // // clean up target listener
   // this.dodoEgg.targetListener = null;
 };
@@ -107,8 +120,11 @@ export const removeTargetListener = async () => {
 export const restartTargetListener = async () => {
   // TODO: return a promise?
   try {
-    this.alchemy.ws.on(this.dodoEgg.targetListener.filter, this.dodoEgg.targetListener.listener);
+    this.alchemy.ws.on(
+      this.dodoEgg.targetListener.filter,
+      this.dodoEgg.targetListener.listener
+    );
   } catch (error) {
-    console.log('There was an error restarting the target listener! \n', error);
+    console.log("There was an error restarting the target listener! \n", error);
   }
 };
