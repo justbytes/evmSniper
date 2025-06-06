@@ -162,47 +162,6 @@ export class UniswapV3 {
       return null;
     }
   }
-  /**
-   * Get human-readable price with token info
-   * @param {string} poolAddress - The Uniswap V3 pool address
-   * @returns {Promise<object>} - Formatted price information
-   */
-  async getFormattedPrice(poolAddress) {
-    try {
-      const poolContract = new ethers.Contract(poolAddress, UNISWAP_V3_POOL_ABI, this.wallet);
-      const slot0 = await poolContract.slot0();
-      const sqrtPriceX96 = slot0.sqrtPriceX96;
-
-      // Get token info
-      const token0Address = await poolContract.token0();
-      const token1Address = await poolContract.token1();
-
-      const token0Info = await this.getTokenInfo(token0Address);
-      const token1Info = await this.getTokenInfo(token1Address);
-
-      // Calculate price
-      const Q96 = 2n ** 96n;
-      const sqrtPrice = BigInt(sqrtPriceX96.toString());
-
-      const numerator = sqrtPrice * sqrtPrice;
-      const denominator = Q96 * Q96;
-
-      const decimalAdjustment = 10n ** BigInt(token0Info.decimals - token1Info.decimals);
-      const adjustedPrice = (numerator * decimalAdjustment) / denominator;
-
-      const formattedPrice = parseFloat(ethers.formatUnits(adjustedPrice, 0));
-
-      return {
-        price: formattedPrice,
-        token0: token0Info,
-        token1: token1Info,
-        display: `1 ${token0Info.symbol} = ${formattedPrice.toFixed(6)} ${token1Info.symbol}`,
-      };
-    } catch (error) {
-      console.error('Error getting formatted price:', error);
-      return null;
-    }
-  }
 
   /**
    * Calculate market cap for a token
@@ -216,30 +175,10 @@ export class UniswapV3 {
       const totalSupply = await tokenContract.totalSupply();
       const decimals = await tokenContract.decimals();
 
-      let priceInUSD = 0;
-
-      if (poolAddress) {
-        // Get price from the specific pool
-        const priceData = await this.getFormattedPrice(poolAddress);
-        if (priceData) {
-          // Determine which token is our target token
-          const poolContract = new ethers.Contract(poolAddress, UNISWAP_V3_POOL_ABI, this.wallet);
-          const token0 = await poolContract.token0();
-          const token1 = await poolContract.token1();
-
-          if (token0.toLowerCase() === tokenAddress.toLowerCase()) {
-            priceInUSD = priceData.price;
-          } else if (token1.toLowerCase() === tokenAddress.toLowerCase()) {
-            priceInUSD = 1 / priceData.price;
-          }
-        }
-      } else {
-        console.warn('No pool address provided for market cap calculation');
-        return 0;
-      }
+      const price = await this.getPrice(poolAddress);
 
       const supply = parseFloat(ethers.formatUnits(totalSupply, decimals));
-      const marketCap = supply * priceInUSD;
+      const marketCap = supply * price;
 
       return marketCap;
     } catch (error) {
@@ -249,15 +188,31 @@ export class UniswapV3 {
   }
 
   /**
+   * Gets the current price, stop loss, and target price, in terms of ETH.
+   * @param {*} tokenAddress
+   * @param {*} targetMultiplier
+   * @param {*} stopLossMultiplier
+   * @returns
+   */
+  async getTargetAndStopLoss(poolAddress, targetMultiplier = 2, stopLossMultiplier = 0.5) {
+    const currentPrice = await this.getPrice(poolAddress);
+    return {
+      currentPrice,
+      targetPrice: currentPrice * targetMultiplier,
+      stopLoss: currentPrice * stopLossMultiplier,
+    };
+  }
+
+  /**
    * Buy tokens using exact ETH input
    * @param {string} tokenAddress - Token to buy
    * @param {number} ethAmount - Amount of ETH to spend
    * @param {number} fee - Pool fee tier (500, 3000, 10000)
    * @param {number} slippageTolerance - Slippage tolerance (0.01 = 1%)
    */
-  async buyToken(tokenAddress, ethAmount = 0.001, fee = 3000, slippageTolerance = 0.02) {
+  async buyToken(tokenAddress, ethAmount = 0.00001, fee) {
     try {
-      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+      const deadline = Math.floor(Date.now() / 1000) + 120; // 5 minutes
       const amountIn = ethers.parseEther(ethAmount.toString());
 
       // Check ETH balance
@@ -290,7 +245,7 @@ export class UniswapV3 {
       }
 
       // Calculate minimum amount out with slippage
-      const slippageMultiplier = BigInt(Math.floor((1 - slippageTolerance) * 10000));
+      const slippageMultiplier = BigInt(Math.floor((1 - this.slippageTolerance) * 10000));
       const minAmountOut = (expectedOut * slippageMultiplier) / 10000n;
 
       const tokenDecimals = await this.getTokenDecimals(tokenAddress);
@@ -353,7 +308,7 @@ export class UniswapV3 {
    * @param {number} fee - Pool fee tier
    * @param {number} slippageTolerance - Slippage tolerance
    */
-  async sellToken(tokenAddress, amount = null, fee = 3000, slippageTolerance = 0.02) {
+  async sellToken(tokenAddress, fee) {
     try {
       const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
 
@@ -411,7 +366,7 @@ export class UniswapV3 {
         );
       }
 
-      const slippageMultiplier = BigInt(Math.floor((1 - slippageTolerance) * 10000));
+      const slippageMultiplier = BigInt(Math.floor((1 - this.slippageTolerance) * 10000));
       const minAmountOut = (expectedOut * slippageMultiplier) / 10000n;
 
       console.log(`💡 Expected ETH out: ${ethers.formatEther(expectedOut)}`);
@@ -462,7 +417,7 @@ export class UniswapV3 {
    * @param {number} fee - Pool fee tier
    * @returns {Promise<BigInt>} - Expected output amount
    */
-  async getSwapQuote(tokenIn, tokenOut, amountIn, fee = 3000) {
+  async getSwapQuote(tokenIn, tokenOut, amountIn, fee) {
     try {
       const quote = await this.quoterContract.quoteExactInputSingle.staticCall(
         tokenIn,
@@ -688,14 +643,17 @@ async function main() {
   const poolAddress = '0x0FB597D6cFE5bE0d5258A7f017599C2A4Ece34c7';
   const tokenAddress = '0x52b492a33E447Cdb854c7FC19F1e57E8BfA1777D';
 
-  console.log(await uni.getMarketCap(tokenAddress, poolAddress));
+  // console.log(await uni.getTargetAndStopLoss(poolAddress));
 
-  // const tokenConfig = {
-  //   tokenAddress: "0x52b492a33E447Cdb854c7FC19F1e57E8BfA1777D"
-  //   targetPrice:
-  //   stopLoss,
-  //   feeTier: 10000n, //  1% Fee pool
-  // };
+  const tokenConfig = {
+    tokenAddress: '0x52b492a33E447Cdb854c7FC19F1e57E8BfA1777D',
+    poolAddress: poolAddress,
+    targetPrice: 3.2453924213097525e-11,
+    stopLoss: 8.113481053274381e-12,
+    feeTier: 10000n, //  1% Fee pool
+  };
+
+  console.log(await uni.buyToken(tokenAddress, 0.00001, 10000n));
 
   // Test buy
   // await uni.buyToken("0x4B6104755AfB5Da4581B81C552DA3A25608c73B8", 0.000001);
