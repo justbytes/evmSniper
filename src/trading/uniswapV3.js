@@ -1,40 +1,40 @@
-import { ethers } from "ethers";
-import { Alchemy } from "alchemy-sdk";
-import { getWallet } from "./getWallet.js";
-import { getAlchemySettings } from "../utils/getAlchemySettings.js";
+import { ethers } from 'ethers';
+import { Alchemy } from 'alchemy-sdk';
+import { getWallet } from './getWallet.js';
+import { getAlchemySettings } from '../utils/getAlchemySettings.js';
 
 // Uniswap V3 ABIs
 const UNISWAP_V3_SWAP_ROUTER_ABI = [
-  "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)",
-  "function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountIn)",
-  "function WETH9() external pure returns (address)",
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+  'function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountIn)',
+  'function WETH9() external pure returns (address)',
 ];
 
 const UNISWAP_V3_QUOTER_ABI = [
-  "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)",
-  "function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) external returns (uint256 amountIn)",
+  'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)',
+  'function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) external returns (uint256 amountIn)',
 ];
 
 const UNISWAP_V3_FACTORY_ABI = [
-  "function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)",
+  'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)',
 ];
 
 const UNISWAP_V3_POOL_ABI = [
-  "event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)",
-  "function token0() external view returns (address)",
-  "function token1() external view returns (address)",
-  "function fee() external view returns (uint24)",
-  "function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
+  'event Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)',
+  'function token0() external view returns (address)',
+  'function token1() external view returns (address)',
+  'function fee() external view returns (uint24)',
+  'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
 ];
 
 const ERC20_ABI = [
-  "function balanceOf(address owner) external view returns (uint256)",
-  "function decimals() external view returns (uint8)",
-  "function symbol() external view returns (string)",
-  "function name() external view returns (string)",
-  "function totalSupply() external view returns (uint256)",
-  "function approve(address spender, uint256 amount) external returns (bool)",
-  "function allowance(address owner, address spender) external view returns (uint256)",
+  'function balanceOf(address owner) external view returns (uint256)',
+  'function decimals() external view returns (uint8)',
+  'function symbol() external view returns (string)',
+  'function name() external view returns (string)',
+  'function totalSupply() external view returns (uint256)',
+  'function approve(address spender, uint256 amount) external returns (bool)',
+  'function allowance(address owner, address spender) external view returns (uint256)',
 ];
 
 /**
@@ -107,44 +107,203 @@ export class UniswapV3 {
   }
 
   /**
-   * Buys a token using native ETH
+   * Get token price in terms of the other token in the pool
+   * @param {string} poolAddress - The Uniswap V3 pool address
+   * @returns {Promise<number>} - Price of token0 in terms of token1
    */
-  async buyToken(tokenAddress, ethAmount = 0.000001, feeTier) {
+  async getPrice(poolAddress) {
     try {
-      const deadline = Math.floor(Date.now() / 1000) + 120; // 2 min deadline
+      const poolContract = new ethers.Contract(poolAddress, UNISWAP_V3_POOL_ABI, this.wallet);
+
+      // Get slot0 data
+      const slot0 = await poolContract.slot0();
+      const sqrtPriceX96 = slot0.sqrtPriceX96;
+
+      // Get token info
+      const token0Address = await poolContract.token0();
+      const token1Address = await poolContract.token1();
+
+      const token0Contract = new ethers.Contract(token0Address, ERC20_ABI, this.wallet);
+      const token1Contract = new ethers.Contract(token1Address, ERC20_ABI, this.wallet);
+
+      const token0Decimals = await token0Contract.decimals();
+      const token1Decimals = await token1Contract.decimals();
+
+      // Calculate price using the Uniswap V3 formula
+      const Q96 = 2n ** 96n;
+      const sqrtPrice = BigInt(sqrtPriceX96.toString());
+
+      // Price = (sqrtPriceX96 / 2^96)^2
+      const numerator = sqrtPrice * sqrtPrice;
+      const denominator = Q96 * Q96;
+
+      // For very precise calculations, we can use a larger intermediate precision
+      const PRECISION = 36; // Use 36 decimal places for intermediate calculation
+      const scaleFactor = 10n ** BigInt(PRECISION);
+
+      // Scale up the numerator for precision, then divide
+      const scaledPrice = (numerator * scaleFactor) / denominator;
+
+      // Adjust for token decimals
+      const decimalDiff = token0Decimals - token1Decimals;
+      const finalPrice = scaledPrice * 10n ** BigInt(decimalDiff);
+
+      // Convert to string with proper decimal places and then to number
+      const priceStr = finalPrice.toString();
+      const decimalPlaces = PRECISION;
+
+      if (priceStr.length <= decimalPlaces) {
+        // Very small number - pad with zeros
+        const paddedStr = priceStr.padStart(decimalPlaces + 1, '0');
+        const formattedPrice = '0.' + paddedStr.slice(1);
+        return parseFloat(formattedPrice);
+      } else {
+        // Insert decimal point
+        const integerPart = priceStr.slice(0, -decimalPlaces);
+        const fractionalPart = priceStr.slice(-decimalPlaces);
+        const formattedPrice = integerPart + '.' + fractionalPart;
+        return parseFloat(formattedPrice);
+      }
+    } catch (error) {
+      console.error('Error getting price:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get human-readable price with token info
+   * @param {string} poolAddress - The Uniswap V3 pool address
+   * @returns {Promise<object>} - Formatted price information
+   */
+  async getFormattedPrice(poolAddress) {
+    try {
+      const poolContract = new ethers.Contract(poolAddress, UNISWAP_V3_POOL_ABI, this.wallet);
+      const slot0 = await poolContract.slot0();
+      const sqrtPriceX96 = slot0.sqrtPriceX96;
+
+      // Get token info
+      const token0Address = await poolContract.token0();
+      const token1Address = await poolContract.token1();
+
+      const token0Info = await this.getTokenInfo(token0Address);
+      const token1Info = await this.getTokenInfo(token1Address);
+
+      // Calculate price
+      const Q96 = 2n ** 96n;
+      const sqrtPrice = BigInt(sqrtPriceX96.toString());
+
+      const numerator = sqrtPrice * sqrtPrice;
+      const denominator = Q96 * Q96;
+
+      const decimalAdjustment = 10n ** BigInt(token0Info.decimals - token1Info.decimals);
+      const adjustedPrice = (numerator * decimalAdjustment) / denominator;
+
+      const formattedPrice = parseFloat(ethers.formatUnits(adjustedPrice, 0));
+
+      return {
+        price: formattedPrice,
+        token0: token0Info,
+        token1: token1Info,
+        display: `1 ${token0Info.symbol} = ${formattedPrice.toFixed(6)} ${token1Info.symbol}`,
+      };
+    } catch (error) {
+      console.error('Error getting formatted price:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate market cap for a token
+   * @param {string} tokenAddress - Token contract address
+   * @param {string} poolAddress - Uniswap V3 pool address (token paired with USDC/USDT/etc)
+   * @returns {Promise<number>} - Market cap in USD
+   */
+  async getMarketCap(tokenAddress, poolAddress) {
+    try {
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
+      const totalSupply = await tokenContract.totalSupply();
+      const decimals = await tokenContract.decimals();
+
+      let priceInUSD = 0;
+
+      if (poolAddress) {
+        // Get price from the specific pool
+        const priceData = await this.getFormattedPrice(poolAddress);
+        if (priceData) {
+          // Determine which token is our target token
+          const poolContract = new ethers.Contract(poolAddress, UNISWAP_V3_POOL_ABI, this.wallet);
+          const token0 = await poolContract.token0();
+          const token1 = await poolContract.token1();
+
+          if (token0.toLowerCase() === tokenAddress.toLowerCase()) {
+            priceInUSD = priceData.price;
+          } else if (token1.toLowerCase() === tokenAddress.toLowerCase()) {
+            priceInUSD = 1 / priceData.price;
+          }
+        }
+      } else {
+        console.warn('No pool address provided for market cap calculation');
+        return 0;
+      }
+
+      const supply = parseFloat(ethers.formatUnits(totalSupply, decimals));
+      const marketCap = supply * priceInUSD;
+
+      return marketCap;
+    } catch (error) {
+      console.error('Failed to get market cap:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Buy tokens using exact ETH input
+   * @param {string} tokenAddress - Token to buy
+   * @param {number} ethAmount - Amount of ETH to spend
+   * @param {number} fee - Pool fee tier (500, 3000, 10000)
+   * @param {number} slippageTolerance - Slippage tolerance (0.01 = 1%)
+   */
+  async buyToken(tokenAddress, ethAmount = 0.001, fee = 3000, slippageTolerance = 0.02) {
+    try {
+      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
       const amountIn = ethers.parseEther(ethAmount.toString());
-
-      // Find the best fee tier if not specified
-      const fee =
-        feeTier || (await this.findBestFeeTier(this.wethAddress, tokenAddress));
-
-      console.log(
-        `🔥 Buying ${ethAmount} ETH worth of tokens with ${
-          fee / 10000
-        }% fee tier...`
-      );
 
       // Check ETH balance
       const ethBalance = await this.getETHBalance();
       console.log(`ETH Balance: ${ethers.formatEther(ethBalance)} ETH`);
-      console.log(`Trying to spend: ${ethers.formatEther(amountIn)} ETH`);
 
-      // Get expected output using quoter
-      const expectedOut =
-        await this.quoterContract.quoteExactInputSingle.staticCall(
+      if (ethBalance < amountIn) {
+        throw new Error(
+          `Insufficient ETH balance. Need ${ethAmount} ETH, have ${ethers.formatEther(
+            ethBalance
+          )} ETH`
+        );
+      }
+
+      // Get quote for expected output
+      let expectedOut;
+      try {
+        expectedOut = await this.quoterContract.quoteExactInputSingle.staticCall(
           this.wethAddress,
           tokenAddress,
           fee,
           amountIn,
-          0 // sqrtPriceLimitX96 (0 = no limit)
+          0 // No price limit for quote
         );
+      } catch (error) {
+        console.error('Quote failed:', error);
+        throw new Error(
+          'Unable to get price quote. Pool may not exist or have insufficient liquidity.'
+        );
+      }
 
-      const minAmountOut =
-        (expectedOut *
-          BigInt(Math.floor((1 - this.slippageTolerance) * 1000))) /
-        1000n;
+      // Calculate minimum amount out with slippage
+      const slippageMultiplier = BigInt(Math.floor((1 - slippageTolerance) * 10000));
+      const minAmountOut = (expectedOut * slippageMultiplier) / 10000n;
 
-      console.log("Expected Out: ", expectedOut);
+      const tokenDecimals = await this.getTokenDecimals(tokenAddress);
+      console.log(`Expected tokens out: ${ethers.formatUnits(expectedOut, tokenDecimals)}`);
+      console.log(`Minimum tokens out: ${ethers.formatUnits(minAmountOut, tokenDecimals)}`);
 
       // Prepare swap parameters
       const params = {
@@ -155,196 +314,116 @@ export class UniswapV3 {
         deadline: deadline,
         amountIn: amountIn,
         amountOutMinimum: minAmountOut,
-        sqrtPriceLimitX96: 0,
+        sqrtPriceLimitX96: 0, // No price limit
       };
 
       // Estimate gas
-      const gasEstimate =
-        await this.routerContract.exactInputSingle.estimateGas(params, {
-          value: amountIn,
-        });
+      const gasEstimate = await this.routerContract.exactInputSingle.estimateGas(params, {
+        value: amountIn,
+      });
 
-      const gasEstimateBigInt = gasEstimate.toBigInt
-        ? gasEstimate.toBigInt()
-        : BigInt(gasEstimate);
-      const gasLimit = (gasEstimateBigInt * 120n) / 100n;
-
-      // Get gas price
-      const gasPrice = await this.alchemy.core.getGasPrice();
-      const gasPriceBigInt = gasPrice.toBigInt
-        ? gasPrice.toBigInt()
-        : BigInt(gasPrice);
-      const gasCost = gasLimit * gasPriceBigInt;
-
-      console.log(`Estimated gas: ${gasEstimate.toString()}`);
-      console.log(`Gas limit (with buffer): ${gasLimit.toString()}`);
-      console.log(`Estimated gas cost: ${ethers.formatEther(gasCost)} ETH`);
-
-      // Check if we have enough ETH
-      const totalCost = amountIn + gasCost;
-      if (ethBalance < totalCost) {
-        throw new Error(
-          `Insufficient ETH. Need ${ethers.formatEther(
-            totalCost
-          )} ETH, have ${ethers.formatEther(ethBalance)} ETH`
-        );
-      }
+      const gasLimit = (gasEstimate * 120n) / 100n; // Add 20% buffer
 
       // Execute swap
-      const txOptions = {
+      const tx = await this.routerContract.exactInputSingle(params, {
         value: amountIn,
         gasLimit: gasLimit,
-        gasPrice: gasPriceBigInt,
-      };
-
-      const tx = await this.routerContract.exactInputSingle(params, txOptions);
-
-      console.log(`Transaction sent: ${tx.hash}`);
-
-      // Wait for receipt (optional, using same pattern as V2)
-      let receipt = null;
-      for (let i = 0; i < 6; i++) {
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          receipt = await this.alchemy.core.getTransactionReceipt(tx.hash);
-          if (receipt && receipt.blockNumber) {
-            console.log(
-              `Transaction confirmed in block: ${receipt.blockNumber}`
-            );
-            break;
-          }
-        } catch (error) {
-          console.log(`Attempt ${i + 1}: Receipt not ready yet...`);
-        }
-      }
-
-      if (!receipt) {
-        console.warn(
-          "Transaction sent but could not confirm receipt after 6 seconds"
-        );
-      }
-
-      // Store position info
-      this.positions.set(tokenAddress, {
-        entryPrice: await this.getPrice(tokenAddress, fee),
-        amount: expectedOut,
-        entryTime: Date.now(),
-        txHash: tx.hash,
-        fee: fee,
       });
+
+      console.log(`🚀 Swap transaction sent: ${tx.hash}`);
+
+      // Wait for confirmation
+      const receipt = await tx.wait();
+      console.log(`✅ Swap confirmed in block: ${receipt.blockNumber}`);
 
       return {
         success: true,
         txHash: tx.hash,
         receipt: receipt,
-        tokensReceived: expectedOut,
-        feeTier: fee,
+        amountIn: amountIn,
+        amountOut: expectedOut,
+        gasUsed: receipt.gasUsed,
       };
     } catch (error) {
-      console.error("Buy failed:", error);
-      return { success: false, error: error.message };
+      console.error('❌ Buy failed:', error);
+      return {
+        success: false,
+        error: error.message,
+        details: error,
+      };
     }
   }
 
   /**
-   * Sells tokens for ETH
+   * Sell tokens for ETH
+   * @param {string} tokenAddress - Token to sell
+   * @param {string} amount - Amount of tokens to sell (will use balance if not specified)
+   * @param {number} fee - Pool fee tier
+   * @param {number} slippageTolerance - Slippage tolerance
    */
-  async sellToken(tokenAddress, tokenAmount, feeTier) {
+  async sellToken(tokenAddress, amount = null, fee = 3000, slippageTolerance = 0.02) {
     try {
-      const { feeTier = null } = options;
-      const deadline = Math.floor(Date.now() / 1000) + 120;
+      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
 
       // Get token info
       const decimals = await this.getTokenDecimals(tokenAddress);
       const tokenBalance = await this.getTokenBalance(tokenAddress);
       const tokenInfo = await this.getTokenInfo(tokenAddress);
 
-      console.log(`📊 Token Info: ${tokenInfo?.name} (${tokenInfo?.symbol})`);
-      console.log(
-        `📊 Token Balance: ${ethers.formatUnits(tokenBalance, decimals)}`
-      );
-      console.log(`📊 Decimals: ${decimals}`);
+      console.log(`📊 Token: ${tokenInfo?.name} (${tokenInfo?.symbol})`);
+      console.log(`📊 Balance: ${ethers.formatUnits(tokenBalance, decimals)}`);
 
-      // Use full balance
-      const amountIn = tokenBalance;
+      // Determine amount to sell
+      let amountIn;
+      if (amount) {
+        amountIn = ethers.parseUnits(amount.toString(), decimals);
+      } else {
+        amountIn = tokenBalance; // Sell entire balance
+      }
 
       if (amountIn === 0n) {
-        throw new Error("No tokens to sell!");
+        throw new Error('No tokens to sell');
       }
 
-      console.log(
-        `💰 Selling ${ethers.formatUnits(amountIn, decimals)} tokens...`
-      );
+      if (amountIn > tokenBalance) {
+        throw new Error('Insufficient token balance');
+      }
 
-      // Find the best fee tier if not specified
-      const fee =
-        feeTier || (await this.findBestFeeTier(tokenAddress, this.wethAddress));
+      console.log(`💰 Selling ${ethers.formatUnits(amountIn, decimals)} ${tokenInfo?.symbol}`);
 
       // Check and approve token spending
-      const tokenContract = new ethers.Contract(
-        tokenAddress,
-        ERC20_ABI,
-        this.wallet
-      );
-      const allowance = await tokenContract.allowance(
-        this.wallet.address,
-        this.routerAddress
-      );
-
-      console.log(
-        `🔍 Current allowance: ${ethers.formatUnits(allowance, decimals)}`
-      );
-      console.log(
-        `🔍 Amount to sell: ${ethers.formatUnits(amountIn, decimals)}`
-      );
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
+      const allowance = await tokenContract.allowance(this.wallet.address, this.routerAddress);
 
       if (allowance < amountIn) {
-        console.log("🔓 Approving token spend...");
-        const approveTx = await tokenContract.approve(
-          this.routerAddress,
-          ethers.MaxUint256
-        );
-        console.log(`Approval transaction sent: ${approveTx.hash}`);
-
-        // Wait for approval
-        console.log("⏳ Waiting for approval to be confirmed...");
-        for (let i = 0; i < 10; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          const newAllowance = await tokenContract.allowance(
-            this.wallet.address,
-            this.routerAddress
-          );
-          console.log(
-            `Checking allowance... ${ethers.formatUnits(
-              newAllowance,
-              decimals
-            )}`
-          );
-          if (newAllowance >= amountIn) {
-            console.log("✅ Approval confirmed!");
-            break;
-          }
-        }
+        console.log('🔓 Approving token spend...');
+        const approveTx = await tokenContract.approve(this.routerAddress, ethers.MaxUint256);
+        await approveTx.wait();
+        console.log('✅ Approval confirmed');
       }
 
-      // Get expected output using quoter
-      console.log("🔍 Getting quote...");
-      const expectedOut =
-        await this.quoterContract.quoteExactInputSingle.staticCall(
+      // Get quote
+      let expectedOut;
+      try {
+        expectedOut = await this.quoterContract.quoteExactInputSingle.staticCall(
           tokenAddress,
           this.wethAddress,
           fee,
           amountIn,
           0
         );
+      } catch (error) {
+        console.error('Quote failed:', error);
+        throw new Error(
+          'Unable to get price quote. Pool may not exist or have insufficient liquidity.'
+        );
+      }
 
-      console.log(`✅ Expected output: ${ethers.formatEther(expectedOut)} ETH`);
+      const slippageMultiplier = BigInt(Math.floor((1 - slippageTolerance) * 10000));
+      const minAmountOut = (expectedOut * slippageMultiplier) / 10000n;
 
-      const minAmountOut =
-        (expectedOut *
-          BigInt(Math.floor((1 - this.slippageTolerance) * 1000))) /
-        1000n;
-      console.log(`🎯 Min amount out: ${ethers.formatEther(minAmountOut)} ETH`);
+      console.log(`💡 Expected ETH out: ${ethers.formatEther(expectedOut)}`);
+      console.log(`🎯 Minimum ETH out: ${ethers.formatEther(minAmountOut)}`);
 
       // Prepare swap parameters
       const params = {
@@ -358,69 +437,53 @@ export class UniswapV3 {
         sqrtPriceLimitX96: 0,
       };
 
-      // Estimate gas
-      console.log("🔍 Testing gas estimation...");
-      const gasEstimate =
-        await this.routerContract.exactInputSingle.estimateGas(params);
+      // Execute swap
+      const tx = await this.routerContract.exactInputSingle(params);
+      console.log(`🚀 Swap transaction sent: ${tx.hash}`);
 
-      console.log(`✅ Gas estimate successful: ${gasEstimate.toString()}`);
-
-      const gasEstimateBigInt = gasEstimate.toBigInt
-        ? gasEstimate.toBigInt()
-        : BigInt(gasEstimate);
-      const gasLimit = (gasEstimateBigInt * 120n) / 100n;
-
-      const gasPrice = await this.alchemy.core.getGasPrice();
-      const gasPriceBigInt = gasPrice.toBigInt
-        ? gasPrice.toBigInt()
-        : BigInt(gasPrice);
-
-      const txOptions = {
-        gasLimit: gasLimit,
-        gasPrice: gasPriceBigInt,
-      };
-
-      const tx = await this.routerContract.exactInputSingle(params, txOptions);
-
-      console.log(`🚀 Transaction sent: ${tx.hash}`);
-
-      // Update position info
-      if (this.positions.has(tokenAddress)) {
-        const position = this.positions.get(tokenAddress);
-        position.exitPrice = await this.getPrice(tokenAddress, fee);
-        position.exitTime = Date.now();
-        position.sellTxHash = tx.hash;
-      }
+      const receipt = await tx.wait();
+      console.log(`✅ Swap confirmed in block: ${receipt.blockNumber}`);
 
       return {
         success: true,
         txHash: tx.hash,
-        ethReceived: expectedOut,
-        feeTier: fee,
+        receipt: receipt,
+        amountIn: amountIn,
+        amountOut: expectedOut,
+        gasUsed: receipt.gasUsed,
       };
     } catch (error) {
-      console.error("Sell failed:", error);
-      return { success: false, error: error.message };
+      console.error('❌ Sell failed:', error);
+      return {
+        success: false,
+        error: error.message,
+        details: error,
+      };
     }
   }
 
   /**
-   * Get token price in ETH using quoter
+   * Get a quote for a swap without executing it
+   * @param {string} tokenIn - Input token address
+   * @param {string} tokenOut - Output token address
+   * @param {string} amountIn - Input amount
+   * @param {number} fee - Pool fee tier
+   * @returns {Promise<BigInt>} - Expected output amount
    */
-  async getPrice(poolAddress) {
+  async getSwapQuote(tokenIn, tokenOut, amountIn, fee = 3000) {
     try {
-      const poolContract = new ethers.Contract(
-        this.dodoEgg.pairAddress,
-        IUniswapV3PoolABI,
-        await this.wallet
+      const quote = await this.quoterContract.quoteExactInputSingle.staticCall(
+        tokenIn,
+        tokenOut,
+        fee,
+        amountIn,
+        0
       );
 
-      const price = await poolContract.slot0();
-
-      return price[0];
+      return quote;
     } catch (error) {
-      console.error("There was a problem getting v3 price!\n", error);
-      return false;
+      console.error('Quote failed:', error);
+      throw error;
     }
   }
 
@@ -429,46 +492,41 @@ export class UniswapV3 {
    */
   async getPoolAddress(tokenA, tokenB, fee) {
     try {
-      const poolAddress = await this.factoryContract.getPool(
-        tokenA,
-        tokenB,
-        fee
-      );
+      const poolAddress = await this.factoryContract.getPool(tokenA, tokenB, fee);
       if (poolAddress === ethers.ZeroAddress) {
-        throw new Error("Pool does not exist");
+        throw new Error('Pool does not exist');
       }
       return poolAddress;
     } catch (error) {
-      console.error("Failed to get pool address:", error);
+      console.error('Failed to get pool address:', error);
       return null;
     }
   }
 
   /**
    * Start target listener (similar to V2 but uses V3 pool events)
-   * 
+   *
    * const tokenConfig {
         tokenAddress,
         poolAddress,
         targetPrice,
         stopLoss,
-        feeTier: 
-      } 
+        feeTier:
+      }
    */
   async startTargetListener(tokenConfig) {
     try {
-      const { tokenAddress, poolAddress, targetPrice, stopLoss, feeTier } =
-        tokenConfig;
+      const { tokenAddress, poolAddress, targetPrice, stopLoss, feeTier } = tokenConfig;
 
       // Create filter for Swap events
       const filter = {
         address: poolAddress,
-        topics: [this.poolInterface.getEvent("Swap").topicHash],
+        topics: [this.poolInterface.getEvent('Swap').topicHash],
       };
 
       const listener = async () => {
         try {
-          console.log("🔄 Swap event detected");
+          console.log('🔄 Swap event detected');
 
           const currentPrice = await this.getPrice(poolAddress);
           const position = this.positions.get(tokenAddress);
@@ -480,17 +538,17 @@ export class UniswapV3 {
 
           // Check target price
           if (targetPrice && currentPrice >= targetPrice) {
-            console.log("🚀 Target price reached! Executing sell...");
-            await this.executeSell(tokenAddress, "TARGET_HIT");
+            console.log('🚀 Target price reached! Executing sell...');
+            await this.executeSell(tokenAddress, 'TARGET_HIT');
           }
 
           // Check stop loss
           if (stopLoss && currentPrice <= stopLoss) {
-            console.log("🛑 Stop loss triggered! Executing sell...");
-            await this.executeSell(tokenAddress, "STOP_LOSS");
+            console.log('🛑 Stop loss triggered! Executing sell...');
+            await this.executeSell(tokenAddress, 'STOP_LOSS');
           }
         } catch (error) {
-          console.error("Error in swap listener:", error);
+          console.error('Error in swap listener:', error);
         }
       };
 
@@ -508,7 +566,7 @@ export class UniswapV3 {
       console.log(`👂 Started listening for ${tokenAddress}`);
       return true;
     } catch (error) {
-      console.error("Failed to start listener:", error);
+      console.error('Failed to start listener:', error);
       return false;
     }
   }
@@ -519,7 +577,7 @@ export class UniswapV3 {
   async stopTargetListener(tokenAddress) {
     const listenerInfo = this.listeners.get(tokenAddress);
     if (!listenerInfo) {
-      console.log("No listener found for token");
+      console.log('No listener found for token');
       return false;
     }
 
@@ -529,7 +587,7 @@ export class UniswapV3 {
       console.log(`🔇 Stopped listening for ${tokenAddress}`);
       return true;
     } catch (error) {
-      console.error("Failed to stop listener:", error);
+      console.error('Failed to stop listener:', error);
       return false;
     }
   }
@@ -553,7 +611,7 @@ export class UniswapV3 {
 
       return result;
     } catch (error) {
-      console.error("Auto-sell failed:", error);
+      console.error('Auto-sell failed:', error);
       return { success: false, error: error.message };
     }
   }
@@ -567,35 +625,23 @@ export class UniswapV3 {
 
   async getTokenBalance(tokenAddress) {
     if (!this.wallet) return 0n;
-    const tokenContract = new ethers.Contract(
-      tokenAddress,
-      ERC20_ABI,
-      this.wallet
-    );
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
     return await tokenContract.balanceOf(this.wallet.address);
   }
 
   async getTokenDecimals(tokenAddress) {
     try {
-      const tokenContract = new ethers.Contract(
-        tokenAddress,
-        ERC20_ABI,
-        this.wallet
-      );
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
       return await tokenContract.decimals();
     } catch (error) {
-      console.error("Failed to get token decimals:", error);
+      console.error('Failed to get token decimals:', error);
       return 18;
     }
   }
 
   async getTokenInfo(tokenAddress) {
     try {
-      const tokenContract = new ethers.Contract(
-        tokenAddress,
-        ERC20_ABI,
-        this.wallet
-      );
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
       const [name, symbol, decimals, totalSupply] = await Promise.all([
         tokenContract.name(),
         tokenContract.symbol(),
@@ -605,27 +651,8 @@ export class UniswapV3 {
 
       return { name, symbol, decimals, totalSupply };
     } catch (error) {
-      console.error("Failed to get token info:", error);
+      console.error('Failed to get token info:', error);
       return null;
-    }
-  }
-
-  async getMarketCap(tokenAddress) {
-    try {
-      const tokenContract = new ethers.Contract(
-        tokenAddress,
-        ERC20_ABI,
-        this.wallet
-      );
-      const totalSupply = await tokenContract.totalSupply();
-      const decimals = await this.getTokenDecimals(tokenAddress);
-      const price = await this.getPrice(tokenAddress);
-
-      const supply = parseFloat(ethers.formatUnits(totalSupply, decimals));
-      return supply * price;
-    } catch (error) {
-      console.error("Failed to get market cap:", error);
-      return 0;
     }
   }
 
@@ -638,20 +665,18 @@ export class UniswapV3 {
   }
 
   getPositions() {
-    return Array.from(this.positions.entries()).map(
-      ([tokenAddress, position]) => ({
-        tokenAddress,
-        ...position,
-      })
-    );
+    return Array.from(this.positions.entries()).map(([tokenAddress, position]) => ({
+      tokenAddress,
+      ...position,
+    }));
   }
 
   async stopAllListeners() {
-    const promises = Array.from(this.listeners.keys()).map((tokenAddress) =>
+    const promises = Array.from(this.listeners.keys()).map(tokenAddress =>
       this.stopTargetListener(tokenAddress)
     );
     await Promise.all(promises);
-    console.log("🛑 All listeners stopped");
+    console.log('🛑 All listeners stopped');
   }
 }
 
@@ -660,17 +685,18 @@ export class UniswapV3 {
  */
 async function main() {
   const uni = new UniswapV3(
-    "8453", // Base
-    "0x2626664c2603336E57B271c5C0b26F421741e481", // SwapRouter address on Base
-    "0x33128a8fC17869897dcE68Ed026d694621f6FDfD", // Factory address on Base
-    "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a" // Quoter address on Base
+    '8453', // Base
+    '0x2626664c2603336E57B271c5C0b26F421741e481', // SwapRouter address on Base
+    '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', // Factory address on Base
+    '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a' // Quoter address on Base
   );
 
   await uni.initialize();
 
-  console.log(
-    await uni.getPrice("0x52b492a33E447Cdb854c7FC19F1e57E8BfA1777D", 10000n)
-  );
+  const poolAddress = '0x0FB597D6cFE5bE0d5258A7f017599C2A4Ece34c7';
+  const tokenAddress = '0x52b492a33E447Cdb854c7FC19F1e57E8BfA1777D';
+
+  console.log(await uni.getMarketCap(tokenAddress, poolAddress));
 
   // const tokenConfig = {
   //   tokenAddress: "0x52b492a33E447Cdb854c7FC19F1e57E8BfA1777D"
