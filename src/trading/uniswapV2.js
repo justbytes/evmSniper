@@ -417,7 +417,7 @@ export class UniswapV2 {
           const currentPrice = await this.getPrice(tokenAddress);
           const position = this.positions.get(tokenAddress);
 
-          // if (!position) return;
+          if (!position) return;
 
           console.log(`Current price: $${currentPrice}`);
           console.log(`Target: $${targetPrice}, Stop Loss: $${stopLoss}`);
