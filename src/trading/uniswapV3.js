@@ -10,10 +10,9 @@ const UNISWAP_V3_SWAP_ROUTER_ABI = [
   'function WETH9() external pure returns (address)',
 ];
 
-const UNISWAP_V3_QUOTER_ABI = [
-  'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)',
-  'function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) external returns (uint256 amountIn)',
-];
+
+import  QuoterV2  from '@uniswap/v3-periphery/artifacts/contracts/lens/QuoterV2.sol/QuoterV2.json'  with { type: 'json' };
+const {abi: UNISWAP_V3_QUOTER_ABI} = QuoterV2
 
 const UNISWAP_V3_FACTORY_ABI = [
   'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)',
@@ -212,12 +211,14 @@ export class UniswapV3 {
    */
   async buyToken(tokenAddress, ethAmount = 0.00001, fee) {
     try {
-      const deadline = Math.floor(Date.now() / 1000) + 120; // 5 minutes
+      const deadline = Math.floor(Date.now() / 1000) + 120; // 2 minutes
       const amountIn = ethers.parseEther(ethAmount.toString());
 
       // Check ETH balance
       const ethBalance = await this.getETHBalance();
       console.log(`ETH Balance: ${ethers.formatEther(ethBalance)} ETH`);
+      console.log("AMOUNT IN: ", amountIn);
+
 
       if (ethBalance < amountIn) {
         throw new Error(
@@ -227,21 +228,28 @@ export class UniswapV3 {
         );
       }
 
-      // Get quote for expected output
+      // Get quote for expected output using QuoterV2
       let expectedOut;
       try {
-        expectedOut = await this.quoterContract.quoteExactInputSingle.staticCall(
-          this.wethAddress,
-          tokenAddress,
-          fee,
-          amountIn,
-          0 // No price limit for quote
-        );
-      } catch (error) {
-        console.error('Quote failed:', error);
-        throw new Error(
-          'Unable to get price quote. Pool may not exist or have insufficient liquidity.'
-        );
+        const quoteParams = {
+          tokenIn: this.wethAddress,
+          tokenOut: tokenAddress,
+          amountIn: amountIn,
+          fee: fee,
+          sqrtPriceLimitX96: 0,
+        };
+
+        // QuoterV2 returns: [amountOut, sqrtPriceX96After, initializedTicksCrossed, gasEstimate]
+        const quoteResult = await this.quoterContract.quoteExactInputSingle.staticCall(quoteParams);
+        console.log(quoteResult);
+
+        // Extract amountOut (first return value)
+        expectedOut = quoteResult[0];
+
+        console.log(`Quote successful - Expected out: ${expectedOut.toString()}`);
+      } catch (quoteError) {
+        console.error('Quote failed with error:', quoteError);
+        return
       }
 
       // Calculate minimum amount out with slippage
