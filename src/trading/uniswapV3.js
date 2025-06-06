@@ -107,9 +107,9 @@ export class UniswapV3 {
   }
 
   /**
-   * Get token price in terms of the other token in the pool
+   * Get token price in terms of ETH
    * @param {string} poolAddress - The Uniswap V3 pool address
-   * @returns {Promise<number>} - Price of token0 in terms of token1
+   * @returns {Promise<number>} - Price of the non-ETH token in terms of ETH
    */
   async getPrice(poolAddress) {
     try {
@@ -119,7 +119,7 @@ export class UniswapV3 {
       const slot0 = await poolContract.slot0();
       const sqrtPriceX96 = slot0.sqrtPriceX96;
 
-      // Get token info
+      // Get token addresses
       const token0Address = await poolContract.token0();
       const token1Address = await poolContract.token1();
 
@@ -129,47 +129,39 @@ export class UniswapV3 {
       const token0Decimals = await token0Contract.decimals();
       const token1Decimals = await token1Contract.decimals();
 
-      // Calculate price using the Uniswap V3 formula
+      // Calculate the raw price (token0 in terms of token1)
       const Q96 = 2n ** 96n;
       const sqrtPrice = BigInt(sqrtPriceX96.toString());
 
-      // Price = (sqrtPriceX96 / 2^96)^2
       const numerator = sqrtPrice * sqrtPrice;
       const denominator = Q96 * Q96;
 
-      // For very precise calculations, we can use a larger intermediate precision
-      const PRECISION = 36; // Use 36 decimal places for intermediate calculation
-      const scaleFactor = 10n ** BigInt(PRECISION);
+      const decimalAdjustment = 10n ** BigInt(token0Decimals - token1Decimals);
+      const price = (numerator * decimalAdjustment) / denominator;
 
-      // Scale up the numerator for precision, then divide
-      const scaledPrice = (numerator * scaleFactor) / denominator;
+      const rawPrice = parseFloat(ethers.formatUnits(price, 0));
 
-      // Adjust for token decimals
-      const decimalDiff = token0Decimals - token1Decimals;
-      const finalPrice = scaledPrice * 10n ** BigInt(decimalDiff);
+      // Determine which token is WETH/ETH
+      const wethAddress = this.wethAddress.toLowerCase();
 
-      // Convert to string with proper decimal places and then to number
-      const priceStr = finalPrice.toString();
-      const decimalPlaces = PRECISION;
-
-      if (priceStr.length <= decimalPlaces) {
-        // Very small number - pad with zeros
-        const paddedStr = priceStr.padStart(decimalPlaces + 1, '0');
-        const formattedPrice = '0.' + paddedStr.slice(1);
-        return parseFloat(formattedPrice);
+      if (token0Address.toLowerCase() === wethAddress) {
+        // token0 is WETH, token1 is the target token
+        // rawPrice = token0/token1 = WETH/token1
+        // We want token1/WETH, so return 1/rawPrice
+        return 1 / rawPrice;
+      } else if (token1Address.toLowerCase() === wethAddress) {
+        // token1 is WETH, token0 is the target token
+        // rawPrice = token0/token1 = token0/WETH
+        // We want token0/WETH, so return rawPrice directly
+        return rawPrice;
       } else {
-        // Insert decimal point
-        const integerPart = priceStr.slice(0, -decimalPlaces);
-        const fractionalPart = priceStr.slice(-decimalPlaces);
-        const formattedPrice = integerPart + '.' + fractionalPart;
-        return parseFloat(formattedPrice);
+        throw new Error('This pool does not contain WETH');
       }
     } catch (error) {
       console.error('Error getting price:', error);
       return null;
     }
   }
-
   /**
    * Get human-readable price with token info
    * @param {string} poolAddress - The Uniswap V3 pool address
