@@ -4,6 +4,7 @@ import { Alchemy } from 'alchemy-sdk';
 import { getWallet } from './getWallet.js';
 import { getAlchemySettings } from '../utils/getAlchemySettings.js';
 
+// Allows us to use require
 const require = createRequire(import.meta.url);
 
 // Uniswap V3 ABIs
@@ -13,19 +14,19 @@ const {
 const {
   abi: UNISWAP_V3_QUOTER_V2_ABI,
 } = require('@uniswap/v3-periphery/artifacts/contracts/lens/QuoterV2.sol/QuoterV2.json');
-
 const {
   abi: UNISWAP_V3_FACTORY_ABI,
 } = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json');
-
 const {
   abi: UNISWAP_V3_POOL_ABI,
 } = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Pool.sol/UniswapV3Pool.json');
-
 const { abi: ERC20_ABI } = require('@uniswap/v2-core/build/ERC20.json');
 
-/**
- * Uniswap V3 Trading Class
+/**     ****************   BUYS ARE IN WETH    ******************
+ * This class has the functionality to trade tokens on uniswap v3 and comes with some helper functions that get prices, token amounts, set/remove swap listeners
+ * keeps a list of positions & listeners, sets stop loss & target price.
+ *
+ * Hard coded to buy 0.00001 ETH and hard coded to sell 100% of a position. These values should be changed if one chooses to run this.
  */
 export class UniswapV3 {
   chainId;
@@ -66,9 +67,11 @@ export class UniswapV3 {
   async initialize() {
     // Create a wallet instance
     this.wallet = await getWallet(this.chainId);
+
+    // Create instance of alchemy
     this.alchemy = new Alchemy(getAlchemySettings(String(this.chainId)));
 
-    // Router contract (SwapRouter)
+    // Router contract
     this.routerContract = new ethers.Contract(
       this.routerAddress,
       UNISWAP_V3_SWAP_ROUTER_02_ABI,
@@ -82,7 +85,7 @@ export class UniswapV3 {
       this.wallet
     );
 
-    // Quoter contract (for price quotes)
+    // Quoter contract
     this.quoterContract = new ethers.Contract(
       this.quoterAddress,
       UNISWAP_V3_QUOTER_V2_ABI,
@@ -91,6 +94,235 @@ export class UniswapV3 {
 
     // Get WETH address from router
     this.wethAddress = await this.routerContract.WETH9();
+  }
+
+  /**
+   * Buy tokens using  WETH
+   * @param {string} tokenAddress - Token to buy
+   * @param {string} fee - Pool fee tier (500, 3000, 10000)
+   */
+  async buyToken(token) {
+    // Get the token info
+    const tokenAddress = token.newTokenAddress;
+    const poolAddress = token.poolAddress;
+    const fee = Number(token.fee);
+
+    // Hard coded buy amount
+    const ethAmount = 0.00001;
+
+    // parse amount to ether
+    const amountIn = ethers.parseEther(ethAmount.toString());
+
+    // Check ETH balance
+    const wethBalance = await this.getTokenBalance(this.wethAddress);
+
+    // Make sure we have enought eth
+    if (wethBalance < amountIn) {
+      throw new Error(
+        `Insufficient ETH balance. Need ${ethAmount} ETH, have ${ethers.formatEther(
+          wethBalance
+        )} ETH`
+      );
+    }
+
+    // get the current price, stop loss, and target prices
+    const { currentPrice, targetPrice, stopLoss } = await this.getTargetAndStopLoss(poolAddress);
+
+    // Create the weth contract
+    const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, this.wallet);
+
+    // Approve the router to take the amount in
+    await wethContract.approve(this.routerAddress, ethers.MaxUint256);
+
+    // Configure quote parameters
+    const quoteParams = {
+      tokenIn: this.wethAddress,
+      tokenOut: tokenAddress,
+      amountIn: amountIn,
+      fee: fee,
+      sqrtPriceLimitX96: 0,
+    };
+
+    // Get the quote
+    const quoteResult = await this.quoterContract.quoteExactInputSingle.staticCall(quoteParams);
+
+    // Set the amountOut and gasEstimate
+    const amountOut = quoteResult[0];
+
+    // Calculate minimum amount out with slippage
+    const slippageMultiplier = BigInt(Math.floor((1 - this.slippageTolerance) * 10000));
+    const minAmountOut = (amountOut * slippageMultiplier) / 10000n;
+
+    // Parameters for the swap
+    const params = {
+      tokenIn: this.wethAddress,
+      tokenOut: tokenAddress,
+      fee: fee,
+      recipient: this.wallet.address,
+      amountIn: amountIn,
+      amountOutMinimum: minAmountOut,
+      sqrtPriceLimitX96: 0,
+    };
+
+    // Execute swap with value for ETH
+    let tx;
+    try {
+      tx = await this.routerContract.exactInputSingle(params);
+    } catch {
+      console.error('****   UNISWAP V3 BUY FAIL   ****');
+      return false;
+    }
+
+    // Wait for confirmation
+    let receipt = null;
+    for (let i = 0; i < 12; i++) {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        receipt = await this.alchemy.core.getTransactionReceipt(tx.hash);
+        if (receipt) {
+          if (receipt.status === 1) {
+            console.log(`✅ Transaction confirmed in block: ${receipt.blockNumber}`);
+            break;
+          } else {
+            console.error(`❌ Transaction failed with status: ${receipt.status}`);
+            throw new Error(`Transaction reverted. Gas used: ${receipt.gasUsed}`);
+          }
+        }
+      } catch (error) {
+        if (error.message.includes('Transaction reverted')) {
+          throw error;
+        }
+        console.log(`Attempt ${i + 1}: Receipt not ready yet...`);
+      }
+    }
+
+    // Store position info
+    this.positions.set(tokenAddress, {
+      ...token,
+      entryPrice: currentPrice,
+      amount: expectedOut,
+      entryTime: Date.now(),
+      txHash: tx.hash,
+    });
+
+    // start the target listener
+    const started = await this.startTargetListener(
+      tokenAddress,
+      token.poolAddress,
+      targetPrice,
+      stopLoss
+    );
+
+    // Throw an error if the listener didn't start
+    if (!started) {
+      throw new Error('****   TARGET LISTENER FAILED TO START   ****');
+    }
+
+    return {
+      success: true,
+      txHash: tx.hash,
+      entryPrice: currentPrice,
+      amount: amountOut,
+      entryTime: Date.now(),
+    };
+  }
+
+  /**
+   * Sell tokens for WETH
+   * @param {string} tokenAddress - Token to sell
+   * @param {number} fee - Pool fee tier
+   */
+  async sellToken(tokenAddress, fee) {
+    fee = Number(fee);
+
+    // Get the token balance
+    const amountIn = await this.getTokenBalance(tokenAddress);
+
+    // Stop if we don't have a token amount
+    if (amountIn === 0n) {
+      return;
+    }
+
+    // Create the token contract
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
+
+    // Approve the router to take the tokens
+    await tokenContract.approve(this.routerAddress, ethers.MaxUint256);
+
+    // Configure quote parameters (note: tokenIn and tokenOut are swapped)
+    const quoteParams = {
+      tokenIn: tokenAddress, // Now selling the token
+      tokenOut: this.wethAddress, // Now receiving WETH
+      amountIn: amountIn,
+      fee: fee,
+      sqrtPriceLimitX96: 0,
+    };
+
+    // Get the quote
+    const quoteResult = await this.quoterContract.quoteExactInputSingle.staticCall(quoteParams);
+
+    // Set the amountOut and gasEstimate
+    const amountOut = quoteResult[0];
+
+    // Calculate minimum amount out with slippage
+    const slippageMultiplier = BigInt(Math.floor((1 - this.slippageTolerance) * 10000));
+    const minAmountOut = (amountOut * slippageMultiplier) / 10000n;
+
+    // Parameters for the swap (tokenIn and tokenOut swapped)
+    const params = {
+      tokenIn: tokenAddress, // Selling the token
+      tokenOut: this.wethAddress, // Receiving WETH
+      fee: fee,
+      recipient: this.wallet.address,
+      amountIn: amountIn,
+      amountOutMinimum: minAmountOut,
+      sqrtPriceLimitX96: 0,
+    };
+
+    let tx;
+    // Execute swap
+    try {
+      tx = await this.routerContract.exactInputSingle(params);
+    } catch {
+      console.error('****   UNISWAP V3 SELL FAILED   ****');
+      return { success: false, error: 'UNISWAP V3 SELL FAILED' };
+    }
+
+    // Wait for confirmation
+    let receipt = null;
+    for (let i = 0; i < 12; i++) {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        receipt = await this.alchemy.core.getTransactionReceipt(tx.hash);
+        if (receipt) {
+          if (receipt.status === 1) {
+            console.log(`✅ Transaction confirmed in block: ${receipt.blockNumber}`);
+            break;
+          } else {
+            console.error(`❌ Transaction failed with status: ${receipt.status}`);
+            throw new Error(`Transaction reverted. Gas used: ${receipt.gasUsed}`);
+          }
+        }
+      } catch (error) {
+        if (error.message.includes('Transaction reverted')) {
+          throw error;
+        }
+        console.log(`Attempt ${i + 1}: Receipt not ready yet...`);
+      }
+    }
+
+    // remove the target listener
+    await this.stopTargetListener(tokenAddress);
+
+    // Remove the the token from the positions
+    this.positions.delete(tokenAddress);
+
+    return {
+      success: true,
+      txHash: tx.hash,
+      amountOut: amountOut,
+      exitTime: Date.now(),
+    };
   }
 
   /**
@@ -132,14 +364,8 @@ export class UniswapV3 {
       const wethAddress = this.wethAddress.toLowerCase();
 
       if (token0Address.toLowerCase() === wethAddress) {
-        // token0 is WETH, token1 is the target token
-        // rawPrice = token0/token1 = WETH/token1
-        // We want token1/WETH, so return 1/rawPrice
         return 1 / rawPrice;
       } else if (token1Address.toLowerCase() === wethAddress) {
-        // token1 is WETH, token0 is the target token
-        // rawPrice = token0/token1 = token0/WETH
-        // We want token0/WETH, so return rawPrice directly
         return rawPrice;
       } else {
         throw new Error('This pool does not contain WETH');
@@ -154,7 +380,7 @@ export class UniswapV3 {
    * Calculate market cap for a token
    * @param {string} tokenAddress - Token contract address
    * @param {string} poolAddress - Uniswap V3 pool address (token paired with USDC/USDT/etc)
-   * @returns {Promise<number>} - Market cap in USD
+   * @returns {Promise<number>}
    */
   async getMarketCap(tokenAddress, poolAddress) {
     try {
@@ -176,9 +402,7 @@ export class UniswapV3 {
 
   /**
    * Gets the current price, stop loss, and target price, in terms of ETH.
-   * @param {*} tokenAddress
-   * @param {*} targetMultiplier
-   * @param {*} stopLossMultiplier
+   * @param {string} tokenAddress
    * @returns
    */
   async getTargetAndStopLoss(poolAddress, targetMultiplier = 2, stopLossMultiplier = 0.5) {
@@ -188,331 +412,6 @@ export class UniswapV3 {
       targetPrice: currentPrice * targetMultiplier,
       stopLoss: currentPrice * stopLossMultiplier,
     };
-  }
-  async buyToken(tokenAddress, ethAmount = 0.00001, fee) {
-    try {
-      // parse amount to ether
-      const amountIn = ethers.parseEther(ethAmount.toString());
-
-      // Check ETH balance
-      const wethBalance = await this.getTokenBalance(this.wethAddress);
-
-      // Make sure we have enought eth
-      if (wethBalance < amountIn) {
-        throw new Error(
-          `Insufficient ETH balance. Need ${ethAmount} ETH, have ${ethers.formatEther(
-            wethBalance
-          )} ETH`
-        );
-      }
-
-      // Create the weth contract
-      const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, this.wallet);
-
-      // Approve the router to take the amount in
-      await wethContract.approve(this.routerAddress, ethers.MaxUint256);
-
-      // Configure quote parameters
-      const quoteParams = {
-        tokenIn: this.wethAddress,
-        tokenOut: tokenAddress,
-        amountIn: amountIn,
-        fee: fee,
-        sqrtPriceLimitX96: 0,
-      };
-
-      // Get the quote
-      const quoteResult = await this.quoterContract.quoteExactInputSingle.staticCall(quoteParams);
-
-      // Set the amountOut and gasEstimate
-      const amountOut = quoteResult[0];
-      const gasEstimate = quoteResult[3];
-      console.log(quoteResult);
-
-      // Calculate minimum amount out with slippage
-      const slippageMultiplier = BigInt(Math.floor((1 - this.slippageTolerance) * 10000));
-      const minAmountOut = (amountOut * slippageMultiplier) / 10000n;
-      const gasLimit = (gasEstimate * 150n) / 100n;
-
-      // Parameters for the swap
-      const params = {
-        tokenIn: this.wethAddress,
-        tokenOut: tokenAddress,
-        fee: fee,
-        recipient: this.wallet.address,
-        amountIn: amountIn,
-        amountOutMinimum: minAmountOut,
-        sqrtPriceLimitX96: 0,
-      };
-
-      // Execute swap with value for ETH
-      let tx;
-      try {
-        tx = await this.routerContract.exactInputSingle(params);
-      } catch (error) {
-        console.error('Simulation failed:', error);
-        return { success: false, error: 'Simulation failed' };
-      }
-
-      console.log(`🚀 Swap transaction sent: ${tx.hash}`);
-
-      // Wait for confirmation
-      let receipt = null;
-      for (let i = 0; i < 12; i++) {
-        try {
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          receipt = await this.alchemy.core.getTransactionReceipt(tx.hash);
-          if (receipt) {
-            if (receipt.status === 1) {
-              console.log(`✅ Transaction confirmed in block: ${receipt.blockNumber}`);
-              break;
-            } else {
-              console.error(`❌ Transaction failed with status: ${receipt.status}`);
-              throw new Error(`Transaction reverted. Gas used: ${receipt.gasUsed}`);
-            }
-          }
-        } catch (error) {
-          if (error.message.includes('Transaction reverted')) {
-            throw error;
-          }
-          console.log(`Attempt ${i + 1}: Receipt not ready yet...`);
-        }
-      }
-
-      return {
-        success: true,
-        txHash: tx.hash,
-        receipt: receipt,
-        amountIn: amountIn,
-        amountOut: amountOut,
-        gasUsed: receipt?.gasUsed || null,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-        details: error,
-      };
-    }
-  }
-
-  /**
-   * Buy tokens using exact ETH input
-   * @param {string} tokenAddress - Token to buy
-   * @param {number} ethAmount - Amount of ETH to spend
-   * @param {number} fee - Pool fee tier (500, 3000, 10000)
-   */
-  // async buyToken(tokenAddress, ethAmount = 0.00001, fee) {
-  //   try {
-  //     // parse amount to ether
-  //     const amountIn = ethers.parseEther(ethAmount.toString());
-
-  //     // Check ETH balance
-  //     const wethBalance = await this.getTokenBalance(this.wethAddress);
-
-  //     // Make sure we have enought eth
-  //     if (wethBalance < amountIn) {
-  //       throw new Error(
-  //         `Insufficient ETH balance. Need ${ethAmount} ETH, have ${ethers.formatEther(
-  //           wethBalance
-  //         )} ETH`
-  //       );
-  //     }
-
-  //     // Create the weth contract
-  //     const wethContract = new ethers.Contract(this.wethAddress, ERC20_ABI, this.wallet);
-
-  //     // Approve the router to take the amount in
-  //     await wethContract.approve(this.routerAddress, ethers.MaxUint256);
-
-  //     // Configure quote parameters
-  //     const quoteParams = {
-  //       tokenIn: this.wethAddress,
-  //       tokenOut: tokenAddress,
-  //       amountIn: amountIn,
-  //       fee: fee,
-  //       sqrtPriceLimitX96: 0,
-  //     };
-
-  //     // Get the quote
-  //     const quoteResult = await this.quoterContract.quoteExactInputSingle.staticCall(quoteParams);
-
-  //     // Set the amountOut and gasEstimate
-  //     const amountOut = quoteResult[0];
-  //     const gasEstimate = quoteResult[3];
-
-  //     // Calculate minimum amount out with slippage
-  //     const slippageMultiplier = BigInt(Math.floor((1 - this.slippageTolerance) * 10000));
-  //     const minAmountOut = (amountOut * slippageMultiplier) / 10000n;
-  //     const gasLimit = (gasEstimate * 150n) / 100n;
-
-  //     // Parameters for the swap
-  //     const params = {
-  //       tokenIn: this.wethAddress,
-  //       tokenOut: tokenAddress,
-  //       fee: fee,
-  //       recipient: this.wallet.address,
-  //       amountIn: amountIn,
-  //       amountOutMinimum: minAmountOut,
-  //       sqrtPriceLimitX96: 0,
-  //     };
-
-  //     // Execute swap with value for ETH
-  //     let tx;
-  //     try {
-  //       tx = await this.routerContract.exactInputSingle(params, {
-  //         gasLimit: gasLimit,
-  //       });
-  //     } catch (error) {
-  //       console.error('Simulation failed:', error);
-  //       return { success: false, error: 'Simulation failed' };
-  //     }
-
-  //     console.log(`🚀 Swap transaction sent: ${tx.hash}`);
-
-  //     // Wait for confirmation
-  //     let receipt = null;
-  //     for (let i = 0; i < 12; i++) {
-  //       try {
-  //         await new Promise(resolve => setTimeout(resolve, 5000));
-  //         receipt = await this.alchemy.core.getTransactionReceipt(tx.hash);
-  //         if (receipt) {
-  //           if (receipt.status === 1) {
-  //             console.log(`✅ Transaction confirmed in block: ${receipt.blockNumber}`);
-  //             break;
-  //           } else {
-  //             console.error(`❌ Transaction failed with status: ${receipt.status}`);
-  //             throw new Error(`Transaction reverted. Gas used: ${receipt.gasUsed}`);
-  //           }
-  //         }
-  //       } catch (error) {
-  //         if (error.message.includes('Transaction reverted')) {
-  //           throw error;
-  //         }
-  //         console.log(`Attempt ${i + 1}: Receipt not ready yet...`);
-  //       }
-  //     }
-
-  //     return {
-  //       success: true,
-  //       txHash: tx.hash,
-  //       receipt: receipt,
-  //       amountIn: amountIn,
-  //       amountOut: amountOut,
-  //       gasUsed: receipt?.gasUsed || null,
-  //     };
-  //   } catch (error) {
-  //     return {
-  //       success: false,
-  //       error: error.message,
-  //       details: error,
-  //     };
-  //   }
-  // }
-  /**
-   * Sell tokens for ETH
-   * @param {string} tokenAddress - Token to sell
-   * @param {number} fee - Pool fee tier
-   */
-  /**
-   * Sell tokens for ETH
-   * @param {string} tokenAddress - Token to sell
-   * @param {number} fee - Pool fee tier
-   */
-  async sellToken(tokenAddress, fee) {
-    try {
-      // Get the token balance
-      const amountIn = await this.getTokenBalance(tokenAddress);
-
-      if (amountIn === 0n) {
-        throw new Error(`No ${tokenAddress} tokens to sell`);
-      }
-
-      // Create the token contract
-      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
-
-      // Approve the router to take the tokens
-      await tokenContract.approve(this.routerAddress, ethers.MaxUint256);
-
-      // Configure quote parameters (note: tokenIn and tokenOut are swapped)
-      const quoteParams = {
-        tokenIn: tokenAddress, // Now selling the token
-        tokenOut: this.wethAddress, // Now receiving WETH
-        amountIn: amountIn,
-        fee: fee,
-        sqrtPriceLimitX96: 0,
-      };
-
-      // Get the quote
-      const quoteResult = await this.quoterContract.quoteExactInputSingle.staticCall(quoteParams);
-
-      // Set the amountOut and gasEstimate
-      const amountOut = quoteResult[0];
-      const gasEstimate = quoteResult[3];
-
-      // Calculate minimum amount out with slippage
-      const slippageMultiplier = BigInt(Math.floor((1 - this.slippageTolerance) * 10000));
-      const minAmountOut = (amountOut * slippageMultiplier) / 10000n;
-      const gasLimit = (gasEstimate * 150n) / 100n;
-
-      // Parameters for the swap (tokenIn and tokenOut swapped)
-      const params = {
-        tokenIn: tokenAddress, // Selling the token
-        tokenOut: this.wethAddress, // Receiving WETH
-        fee: fee,
-        recipient: this.wallet.address,
-        amountIn: amountIn,
-        amountOutMinimum: minAmountOut,
-        sqrtPriceLimitX96: 0,
-      };
-
-      // Execute swap
-      let tx;
-      try {
-        tx = await this.routerContract.exactInputSingle(params);
-      } catch (error) {
-        console.error('Simulation failed:', error);
-        return { success: false, error: 'Simulation failed' };
-      }
-
-      // Wait for confirmation
-      let receipt = null;
-      for (let i = 0; i < 12; i++) {
-        try {
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          receipt = await this.alchemy.core.getTransactionReceipt(tx.hash);
-          if (receipt) {
-            if (receipt.status === 1) {
-              console.log(`✅ Transaction confirmed in block: ${receipt.blockNumber}`);
-              break;
-            } else {
-              console.error(`❌ Transaction failed with status: ${receipt.status}`);
-              throw new Error(`Transaction reverted. Gas used: ${receipt.gasUsed}`);
-            }
-          }
-        } catch (error) {
-          if (error.message.includes('Transaction reverted')) {
-            throw error;
-          }
-          console.log(`Attempt ${i + 1}: Receipt not ready yet...`);
-        }
-      }
-
-      return {
-        success: true,
-        txHash: tx.hash,
-        receipt: receipt,
-        amountIn: amountIn,
-        amountOut: amountOut,
-        gasUsed: receipt?.gasUsed || null,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-        details: error,
-      };
-    }
   }
 
   /**
@@ -532,20 +431,10 @@ export class UniswapV3 {
   }
 
   /**
-   * Start target listener (similar to V2 but uses V3 pool events)
-   *
-   * const tokenConfig {
-        tokenAddress,
-        poolAddress,
-        targetPrice,
-        stopLoss,
-        feeTier:
-      }
+   * Start target listener for swap events
    */
-  async startTargetListener(tokenConfig) {
+  async startTargetListener(tokenAddress, poolAddress, targetPrice, stopLoss) {
     try {
-      const { tokenAddress, poolAddress, targetPrice, stopLoss, feeTier } = tokenConfig;
-
       // Create filter for Swap events
       const filter = {
         address: poolAddress,
@@ -559,10 +448,7 @@ export class UniswapV3 {
           const currentPrice = await this.getPrice(poolAddress);
           const position = this.positions.get(tokenAddress);
 
-          // if (!position) return
-
-          console.log(`Current price: $${currentPrice}`);
-          console.log(`Target: $${targetPrice}, Stop Loss: $${stopLoss}`);
+          if (!position) return;
 
           // Check target price
           if (targetPrice && currentPrice >= targetPrice) {
@@ -587,7 +473,9 @@ export class UniswapV3 {
       this.listeners.set(tokenAddress, {
         filter,
         listener,
-        tokenConfig,
+        poolAddress,
+        targetPrice,
+        stopLoss,
         startTime: Date.now(),
       });
 
@@ -621,7 +509,7 @@ export class UniswapV3 {
   }
 
   /**
-   * Execute sell (used by listeners)
+   * Execute sell and gives displays if it was a stop loss or target price hit
    */
   async executeSell(tokenAddress, reason) {
     try {
@@ -630,9 +518,7 @@ export class UniswapV3 {
 
       console.log(`Selling tokens due to: ${reason}`);
 
-      const result = await this.sellToken(tokenAddress, null, {
-        feeTier: position.fee,
-      });
+      const result = await this.sellToken(tokenAddress, position.fee);
 
       // Stop the listener after selling
       await this.stopTargetListener(tokenAddress);
@@ -644,19 +530,18 @@ export class UniswapV3 {
     }
   }
 
-  // Utility methods
-  async getWETHBalance() {
-    if (!this.wallet) return 0n;
-    const balance = await this.alchemy.core.getBalance(this.wallet.address);
-    return balance.toBigInt();
-  }
-
+  /**
+   * Gets balance for a given token address
+   */
   async getTokenBalance(tokenAddress) {
     if (!this.wallet) return 0n;
     const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
     return await tokenContract.balanceOf(this.wallet.address);
   }
 
+  /**
+   * Gets a tokens decimals
+   */
   async getTokenDecimals(tokenAddress) {
     try {
       const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
@@ -667,6 +552,9 @@ export class UniswapV3 {
     }
   }
 
+  /**
+   * Get all of the token info
+   */
   async getTokenInfo(tokenAddress) {
     try {
       const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
@@ -684,6 +572,9 @@ export class UniswapV3 {
     }
   }
 
+  /**
+   * Gets all of the active swap listeners
+   */
   getActiveListeners() {
     return Array.from(this.listeners.entries()).map(([tokenAddress, info]) => ({
       tokenAddress,
@@ -692,6 +583,9 @@ export class UniswapV3 {
     }));
   }
 
+  /**
+   * Gets all of the current positions
+   */
   getPositions() {
     return Array.from(this.positions.entries()).map(([tokenAddress, position]) => ({
       tokenAddress,
@@ -699,6 +593,9 @@ export class UniswapV3 {
     }));
   }
 
+  /**
+   * stops all listeners
+   */
   async stopAllListeners() {
     const promises = Array.from(this.listeners.keys()).map(tokenAddress =>
       this.stopTargetListener(tokenAddress)
@@ -707,35 +604,3 @@ export class UniswapV3 {
     console.log('🛑 All listeners stopped');
   }
 }
-
-/**
- * For testing - Base network addresses
- */
-async function main() {
-  const uni = new UniswapV3(
-    '8453', // Base
-    '0x2626664c2603336E57B271c5C0b26F421741e481', // SwapRouter address on Base
-    '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', // Factory address on Base
-    '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a' // Quoter address on Base
-  );
-
-  await uni.initialize();
-
-  const poolAddress = '0x0FB597D6cFE5bE0d5258A7f017599C2A4Ece34c7';
-  const tokenAddress = '0x52b492a33E447Cdb854c7FC19F1e57E8BfA1777D';
-
-  // console.log(await uni.getTargetAndStopLoss(poolAddress));
-
-  const tokenConfig = {
-    tokenAddress: '0x52b492a33E447Cdb854c7FC19F1e57E8BfA1777D',
-    poolAddress: poolAddress,
-    targetPrice: 3.2453924213097525e-11,
-    stopLoss: 8.113481053274381e-12,
-    feeTier: 10000n, //  1% Fee pool
-  };
-
-  console.log(await uni.getPrice(poolAddress));
-}
-
-// Uncomment to test
-main();

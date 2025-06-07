@@ -87,7 +87,8 @@ export class UniswapV2 {
    * @param {*} token will be a token obejct that comes from the Websocket server
    * @returns
    */
-  async buyToken(token, ethAmount = 0.000001) {
+  async buyToken(token) {
+    const ethAmount = 0.000001;
     const tokenAddress = token.newTokenAddress;
 
     // Get currentPrice, targetPrice, and stop loss for the token pair
@@ -135,13 +136,6 @@ export class UniswapV2 {
       );
     }
 
-    // Prepare transaction options with dynamic gas
-    let txOptions = {
-      value: amountIn,
-      gasLimit: gasLimit,
-      gasPrice: gasPriceBigInt, // Add gas price to options
-    };
-
     let tx;
     // Make the swap
     try {
@@ -150,7 +144,6 @@ export class UniswapV2 {
         path,
         this.wallet.address,
         deadline
-        // txOptions
       );
     } catch (error) {
       console.error('****    UNISWAP V2 BUY FAILED   ****');
@@ -200,7 +193,13 @@ export class UniswapV2 {
       throw new Error('****   TARGET LISTENER FAILED TO START   ****');
     }
 
-    return true;
+    return {
+      success: true,
+      txHash: tx.hash,
+      entryPrice: currentPrice,
+      amount: expectedOut,
+      entryTime: Date.now(),
+    };
   }
 
   /**
@@ -269,7 +268,8 @@ export class UniswapV2 {
     return {
       success: true,
       txHash: tx.hash,
-      ethReceived: expectedOut,
+      amountOut: expectedOut,
+      exitTime: Date.now(),
     };
   }
 
