@@ -1,6 +1,6 @@
 [
   {
-    "chain": "ethereum",
+    "chain": "Ethereum",
     "chain_id": "1",
     "dex": "uniswap",
     "v2": {
@@ -14,7 +14,7 @@
     }
   },
   {
-    "chain": "base",
+    "chain": "Base",
     "chain_id": "8453",
     "dex": "uniswap",
     "v2": {

@@ -1,17 +1,28 @@
 import { WebSocketServer } from 'ws';
 import { EventEmitter } from 'events';
 import { rugpullDetection, tokenSecurity, rateLimiter } from './audit/index.js';
+import { getTradingInstance } from './trading/index.js';
 
+/**
+ * This class is responsible for running the GoPlus audit on new tokens and if the token contract passes then it attempt to buy
+ * and sells if the stop loss or target price have been hit.
+ */
 export class WebSocketController extends EventEmitter {
-  constructor(port = 8069, traders) {
+  /**
+   * Constructor
+   */
+  constructor(port = 8069, tradingInstances = {}) {
     super();
     this.port = port;
     this.wss = null;
     this.isRunning = false;
     this.rateLimiterMonitor = null;
-    this.dex;
+    this.tradingInstances = tradingInstances;
   }
 
+  /**
+   * Starts up the server on the specified port. starts event handlers and the rate limiter for the go plus audits
+   */
   async startServer() {
     if (this.isRunning) {
       console.log('Server already running');
@@ -36,6 +47,9 @@ export class WebSocketController extends EventEmitter {
     }
   }
 
+  /**
+   * Displays the rate limiter stats every 30 seconds
+   */
   startRateLimiterMonitor() {
     // Monitor rate limiter status every 30 seconds
     this.rateLimiterMonitor = setInterval(() => {
@@ -49,6 +63,9 @@ export class WebSocketController extends EventEmitter {
     }, 30000);
   }
 
+  /**
+   * Setup and initialize connections
+   */
   setupEventHandlers() {
     this.wss.on('connection', (ws, request) => {
       console.log(`New connection from ${request.socket.remoteAddress}`);
@@ -66,6 +83,9 @@ export class WebSocketController extends EventEmitter {
     });
   }
 
+  /**
+   * Handle the data/request coming in from client
+   */
   handleConnection(ws) {
     // Set up ping/pong for connection health
     ws.isAlive = true;
@@ -92,7 +112,7 @@ export class WebSocketController extends EventEmitter {
         if (!token) return;
 
         // snipe the token
-        this.runTrade(token);
+        await this.runTrade(token);
       } catch (error) {
         console.error('Error processing message:', error);
       }
@@ -108,6 +128,9 @@ export class WebSocketController extends EventEmitter {
     });
   }
 
+  /**
+   * Yet to be implemented
+   */
   handleDisconnection(ws) {
     // Clean up any connection-specific data
     this.emit('connectionClosed', ws.id);
@@ -116,6 +139,9 @@ export class WebSocketController extends EventEmitter {
     this.saveDataToFile();
   }
 
+  /**
+   * Parse the data recieved from clients
+   */
   async deserializeData(data) {
     try {
       // Handle both Buffer and string data
@@ -126,6 +152,9 @@ export class WebSocketController extends EventEmitter {
     }
   }
 
+  /**
+   * Used for pinging server
+   */
   async pingServer() {
     if (!this.wss) return false;
 
@@ -148,6 +177,9 @@ export class WebSocketController extends EventEmitter {
     });
   }
 
+  /**
+   * Shuts down the server
+   */
   async stopServer() {
     if (!this.isRunning) {
       console.log('Server not running');
@@ -204,9 +236,6 @@ export class WebSocketController extends EventEmitter {
 
     // Stop if token is unsafe
     if (!securityCheck.success) {
-      // console.log(
-      //   `[Token Audit] Security check failed for ${token.newTokenAddress}`
-      // );
       return false;
     }
 
@@ -215,9 +244,6 @@ export class WebSocketController extends EventEmitter {
 
     // Stop if its token is unsafe
     if (!rugCheck.success) {
-      // console.log(
-      //   `[Token Audit] Rugpull check failed for ${token.newTokenAddress}`
-      // );
       return false;
     }
 
@@ -231,20 +257,66 @@ export class WebSocketController extends EventEmitter {
     };
   }
 
+  /**
+   * Attempts to buy a new token
+   */
   async runTrade(token) {
-    if (token.v3) {
-      // RUN UNISWAP V3 TRADE - SOON TO BE IMPLEMENTED
-    } else {
+    try {
+      // Get the appropriate trading instance
+      const tradingInstance = getTradingInstance(this.tradingInstances, token);
+
+      // Stop if theres no matching instance
+      if (!tradingInstance) {
+        console.error(`❌ No trading instance found for token:`, {
+          chain: token.chain,
+          chainId: token.chainId,
+          version: token.v3 ? 'V3' : 'V2',
+          tokenAddress: token.newTokenAddress,
+        });
+        return;
+      }
+
+      const version = token.v3 ? 'V3' : 'V2';
+      const instanceName = `${token.chain || 'unknown'}${version}`;
+
+      console.log(`🎯 Using ${instanceName} instance for trading`);
       console.log(`****   SNIPING ${token.newTokenAddress}   ****`);
+
+      // Execute the trade
+      const result = await tradingInstance.buyToken(token);
+
+      if (result && result.success) {
+        console.log(`✅ Trade successful:`, {
+          txHash: result.txHash,
+          entryPrice: result.entryPrice,
+          amount: result.amount.toString(),
+          instanceUsed: instanceName,
+        });
+      } else {
+        console.error(`❌ Trade failed for ${token.newTokenAddress}`);
+      }
+
+      return result;
+    } catch (error) {
+      console.error(`❌ Error executing trade for ${token.newTokenAddress}:`, error);
+      return { success: false, error: error.message };
     }
   }
 
+  /**
+   * Should be used to save a buy tx to file
+   *
+   * Note: This will probably get moved to the utils dir and be called in the trading classes instead.
+   */
   saveDataToFile() {
     // Implement your save logic here
     console.log(`This should save a token to file`);
     // Example: fs.writeFileSync('data.json', JSON.stringify([...this.newtokens]));
   }
 
+  /**
+   * Creates a unique connection id for a websocket connection
+   */
   generateConnectionId() {
     return `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
@@ -256,9 +328,13 @@ export class WebSocketController extends EventEmitter {
       isRunning: this.isRunning,
       connectedClients: this.wss ? this.wss.clients.size : 0,
       rateLimiter: rateLimiterStatus,
+      tradingInstances: Object.keys(this.tradingInstances),
     };
   }
 
+  /**
+   * Broadcast a message to a client
+   */
   broadcast(message) {
     if (!this.wss) return;
 
@@ -275,9 +351,14 @@ export class WebSocketController extends EventEmitter {
     return rateLimiter.getStatus();
   }
 
-  // Reset rate limiter (emergency use)
+  // Reset rate limiter
   resetRateLimiter() {
     console.log('⚠️  Resetting rate limiter - use with caution!');
     rateLimiter.reset();
+  }
+
+  // Get available trading instances
+  getTradingInstances() {
+    return Object.keys(this.tradingInstances);
   }
 }
