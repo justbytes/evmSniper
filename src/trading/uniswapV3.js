@@ -22,15 +22,7 @@ const {
   abi: UNISWAP_V3_POOL_ABI,
 } = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Pool.sol/UniswapV3Pool.json');
 
-const ERC20_ABI = [
-  'function balanceOf(address owner) external view returns (uint256)',
-  'function decimals() external view returns (uint8)',
-  'function symbol() external view returns (string)',
-  'function name() external view returns (string)',
-  'function totalSupply() external view returns (uint256)',
-  'function approve(address spender, uint256 amount) external returns (bool)',
-  'function allowance(address owner, address spender) external view returns (uint256)',
-];
+const { abi: ERC20_ABI } = require('@uniswap/v2-core/build/ERC20.json');
 
 /**
  * Uniswap V3 Trading Class
@@ -436,13 +428,6 @@ export class UniswapV3 {
         throw new Error(`No ${tokenAddress} tokens to sell`);
       }
 
-      // Calculate amount to sell (percentage of balance)
-      //const amountIn = (tokenBalance * BigInt(tokenAmountPercent)) / 100n;
-
-      if (amountIn === 0n) {
-        throw new Error(`Amount to sell is 0`);
-      }
-
       // Create the token contract
       const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, this.wallet);
 
@@ -489,8 +474,6 @@ export class UniswapV3 {
         console.error('Simulation failed:', error);
         return { success: false, error: 'Simulation failed' };
       }
-
-      console.log(`🚀 Sell transaction sent: ${tx.hash}`);
 
       // Wait for confirmation
       let receipt = null;
@@ -751,7 +734,7 @@ async function main() {
     feeTier: 10000n, //  1% Fee pool
   };
 
-  console.log(await uni.sellToken(tokenAddress, 10000));
+  console.log(await uni.getPrice(poolAddress));
 }
 
 // Uncomment to test
