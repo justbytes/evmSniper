@@ -527,7 +527,7 @@ export class UniswapV2 {
   async getETHBalance() {
     if (!this.wallet) return 0n;
     const balance = await this.alchemy.core.getBalance(this.wallet.address);
-    return balance.toBigInt(); // Convert BigNumber to BigInt
+    return balance.toBigInt(); // Convert to BigInt
   }
 
   /**
