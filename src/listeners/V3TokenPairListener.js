@@ -1,10 +1,16 @@
+import { createRequire } from 'module';
 import { ethers } from 'ethers';
 import { Alchemy } from 'alchemy-sdk';
 import { getAlchemySettings } from '../utils/getAlchemySettings.js';
 import { findNewToken } from '../utils/newTokenChecker.js';
 
-import  UniswapV3Factory from '@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json'  with { type: 'json' };
-const {abi: UniswapV3FactoryABI} = UniswapV3Factory
+// Allows us to use require
+const require = createRequire(import.meta.url);
+
+// get abi
+const {
+  abi: UniswapV3FactoryABI,
+} = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json');
 
 // Get the interface of the ABI
 const FACTORY_V3_INTERFACE = new ethers.Interface(UniswapV3FactoryABI);
@@ -65,7 +71,6 @@ export class V3TokenPairListener {
 
     // console.log("DECODED LOG: ", this.chainId, token0, token1, pool, fee);
 
-
     // console.log('************* | V3 pair detected | *************');
     // console.log('');
 
@@ -76,8 +81,6 @@ export class V3TokenPairListener {
 
     // console.log("NewToken ", newToken);
     // console.log("BaseToken ", baseToken);
-
-
 
     // If both tokens are known, return
     if (!newToken && !baseToken) {

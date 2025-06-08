@@ -1,11 +1,14 @@
+import { createRequire } from 'module';
 import { ethers } from 'ethers';
 import { Alchemy } from 'alchemy-sdk';
 import { getAlchemySettings } from '../utils/getAlchemySettings.js';
 import { findNewToken } from '../utils/newTokenChecker.js';
 
-// Get contract ABI's
-import UniswapV2Factory from '@uniswap/v2-periphery/build/IUniswapV2Factory.json' with { type: 'json' };
-const { abi: UniswapV2FactoryABI } = UniswapV2Factory;
+// Allows us to use require
+const require = createRequire(import.meta.url);
+
+// Get abi
+const { abi: UniswapV2FactoryABI } = require('@uniswap/v2-periphery/build/IUniswapV2Factory.json');
 
 // Get the interface of the ABI
 const FACTORY_V2_INTERFACE = new ethers.Interface(UniswapV2FactoryABI);
@@ -69,8 +72,6 @@ export class V2TokenPairListener {
     const { token0, token1, pair } = decodedLog.args;
     // console.log("DECODED LOG: ",this.chainId, token0, token1, pair);
 
-
-
     // console.log('************* | V2 pair detected | *************');
     // console.log('');
 
@@ -81,7 +82,6 @@ export class V2TokenPairListener {
 
     // console.log("NewToken ", newToken);
     // console.log("BaseToken ", baseToken);
-
 
     // If both tokens are known, return
     if (!newToken && !baseToken) {
