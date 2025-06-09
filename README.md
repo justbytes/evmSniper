@@ -1,61 +1,162 @@
 ![evmSniper banner](/assets/evmSniper_banner.png)
 
-# EVM SNIPER BOT
+# 🤖 EVM Sniper Bot
 
-EVM Sniper bot can be used to snipe tokens on EVM blockchains with any fork of the Uniswap dex but currently only configured for ETH & Base mainnet. On start up listeners subscribe to `PairCreated` or `PoolCreated` events coming from the dexs and sends the data via websocket. The websocket runs 2 GoPlus security audits on the new token and if it passes it the attempts to buy. The current configuration is for the buy to be 0.00001, target price is at a 20% increase, and stop loss is set for a ~20%. When the price target or stop loss are hit it sells 100% of the position.
+An automated multi-chain token trading system that monitors Uniswap V2/V3 protocols across Ethereum and Base networks for newly launched tokens. Built with Node.js, ethers.js, alchemy-sdk, and WebSocket architecture for real-time blockchain event processing and intelligent trading execution.
 
-- #### The Uniswap version 3 uses WETH to buy tokens and the Uniswap version 2 utilizes native eth for buys.
+## 🌐 Live Demo
+Currently configured for Ethereum and Base mainnet networks
 
-## USAGE
+## ⚠️ Security Notice
+Create a new wallet for this program and remove funds when not actively using
 
-#### PLEASE CREATE A NEW WALLET FOR THIS PROGRAM AND REMOVE FUNDS FROM WALLET WHEN NOT ACTIVLY USING THE PROGRAM.
+## ✨ Features
 
-- You will need a wallet that contains Eth and WEth for any chain listed in `uniswap.json` file
-- Go to the `UniswapV2.js` and `UniswapV3.js` files and modify the amount of eth to buy with. Default is 0.00001
+- **Real-time Token Detection**  
+ Monitors PairCreated and PoolCreated events across multiple DEXs
+- **Automated Security Auditing**  
+ Integrated GoPlus API with rugpull detection and token security validation
+- **Intelligent Trading Engine**  
+ Supports both Uniswap V2 and V3 protocols
+- **Custom Trading Algorithm**  
+ Automated stop-loss and target price execution capabilities
+- **Multi-Chain Support**  
+ Ethereum and Base mainnet with extensible configuration
+- **Rate-Limited API Integration**  
+ Custom rate limiter with queue management and exponential backoff
+- **WebSocket Architecture**  
+ Real-time event processing with graceful error handling
 
-### ALCHEMY API Key
+## 🛠 Tech Stack
 
-This app requires an Alchemy rpc url. You can get a sign up for a free one [here](https://www.alchemy.com/). Once you're signed up you will see a dashboard where you can create a new app. Create a new app and select the Base & Ethereum Mainnet networks. Grab the API Key in the top right corner paste it into the approprate .env variable using the .env.example for reference.
+### Backend & Infrastructure
+- Node.js
+- WebSocket Server for event-driven architecture
+- Custom rate limiting and queue management
 
-### Cast Wallet Setup
+### Blockchain Integration
+- ethers.js for smart contract interactions
+- Alchemy SDK for blockchain providers
+- Uniswap V2/V3 protocol integration
+- Cast wallet for secure signing
 
-This bot uses the cast wallet to create a signer. Its recommended to install [Foundry](https://book.getfoundry.sh/introduction/installation/) which comes with cast. From there you can setup a wallet with the following commands.
+### APIs & Security
+- GoPlus Security API for token auditing
+- Custom rate limiter (30 calls/minute)
+- Automated security validation pipeline
 
+## 🏗 Architecture
+
+### Multi-Protocol Trading System
+This application uses a dual-protocol approach:
+
+**Uniswap V2 Trading**
+- Uses native ETH for token purchases
+- Monitors PairCreated events from factory contracts
+- Implements slippage protection
+
+**Uniswap V3 Trading**
+- Uses WETH for token purchases
+- Monitors PoolCreated events with fee tier support
+- Advanced price calculation using sqrtPriceX96
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js 18+
+- Foundry (for Cast wallet)
+- Alchemy API key
+- ETH and WETH on target networks
+
+### 1. Environment Setup
+Create a .env file using the provided .env.example:
+
+```env
+ALCHEMY_KEY=your_alchemy_api_key
+CAST_WALLET_NAME=your_wallet_name
+CAST_WALLET_PASSWORD=your_wallet_password
+PORT=8069
 ```
+### 2. Cast Wallet Setup
+Create a new wallet using Foundry's Cast:
+```bash
 cast wallet import <WALLET_NAME_HERE> --interactive
 ```
 
-This will prompt you to enter a private key and set a password for the wallet. Once this is complete add the name of the wallet and the password to the .env file.
+Enter your private key and set a password when prompted.
 
-If you wish to clean up the terminal after this run the following commands but NOTE IT WILL DELETE ALL OF YOUR TERMINAL HISTORY. This is recommended anytime you input sensitive information into the terminal.
-
-```
+Security cleanup (optional but recommended):
+```bash
 history -c
 rm ~/.bash_history
 ```
 
-### Install dependencies
-
-Install all dependiencies with:
-
-```
+### 3. Install Dependencies
+```bash
 npm install
 ```
 
-### Start Program
+### 4. Configure DEX Settings
+- Review and modify `uniswap.json` for your target networks and DEX configurations
+- Update `known_tokens.json` with base tokens for each network (WETH, USDC, USDT, etc.)
 
-After above steps have been taken you can run:
-
+### 5. Customize Trading Parameters
+Navigate to `UniswapV2.js` and `UniswapV3.js`:
+```javascript
+// Modify buy amount (default: 0.00001 ETH)
+const ethAmount = 0.00001;
+// Adjust risk parameters
+const targetMultiplier = 2;    // 200% gain target
+const stopLossMultiplier = 0.5; // 50% loss threshold
 ```
+
+### 6. Start the Application
+```bash
 npm run start
 ```
 
-### Adding a DEX
+## 🔧 System Management
 
-If you want to add another EVM chain open the `uniswap.json` file and add the deployement addresses for the contracts. Next open `known_tokens.json` and add any token address that can be used to create a pool (ex: WETH, USDC, USDT, ect.). This is needed for the `newTokenChecker.js` which uses this list to find out which token (token0 or token1) is the new token from the Pair/PoolCreated event data.
+### Adding New DEX Support
+1. Update `uniswap.json` with contract addresses:
+```json
+{
+  "chain": "YourChain",
+  "chain_id": "123",
+  "dex": "uniswap",
+  "v2": {
+    "factory": "0x...",
+    "router": "0x..."
+  },
+  "v3": {
+    "factory": "0x...",
+    "router": "0x...",
+    "quoter": "0x..."
+  }
+}  
+```
+3. Add base tokens to `known_tokens.json`
+4. Update chain utilities in `utils/` directory
 
-### FUTURE DEVELOPMENTS
+### Rate Limiter Management
+The system includes advanced rate limiting for GoPlus API calls:
 
-- After a buy/sell transaction we should save the the data to a SQLite database for easy indexing in the future.
-- Optomize the allowance/approval of the tokens in the buy and sell functions.
-- Create an interactive terminal to see current positions and listeners
+- **Monitor status:** Check console logs for rate limiter statistics
+- **Queue management:** Automatic queuing during high-traffic periods
+- **Recovery:** Built-in exponential backoff and retry logic
+
+## 🔮 Roadmap
+
+### Planned Features
+- **Database Integration**  
+  SQLite implementation for trade history and analytics
+- **Portfolio Dashboard**  
+  Real-time position tracking and P&L analysis
+- **Advanced Filtering**  
+  Market cap, volume, and liquidity-based token filtering
+- **Multi-DEX Support**  
+  SushiSwap, PancakeSwap, and other Uniswap forks
+- **Enhanced Security**  
+  Additional audit providers and custom security checks
+- **Terminal Interface**  
+  Interactive CLI for position management
