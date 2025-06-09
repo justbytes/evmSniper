@@ -5,7 +5,7 @@
 An automated multi-chain token trading system that monitors Uniswap V2/V3 protocols across Ethereum and Base networks for newly launched tokens. Built with Node.js, ethers.js, alchemy-sdk, and WebSocket architecture for real-time blockchain event processing and intelligent trading execution.
 
 ## 🌐 Live Demo
-Currently configured for Ethereum and Base mainnet networks
+[Watch demo](https://youtu.be/9aFwrFuyKwY)
 
 ## ⚠️ Security Notice
 Create a new wallet for this program and remove funds when not actively using
